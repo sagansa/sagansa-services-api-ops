@@ -60,10 +60,10 @@ class AttendanceTest extends TestCase
         $response = $this->postJson('/api/attendance/check-in', [
             'store_id' => $store->id,
             'shift_store_id' => $shift->id,
-            'image_in' => $this->fakeImageData(),
+            'photo' => \Illuminate\Http\UploadedFile::fake()->image('selfie.jpg'),
             'check_in' => CarbonImmutable::create(2024, 1, 1, 8, 5, 0, 'UTC')->toISOString(),
-            'latitude_in' => -6.1753,
-            'longitude_in' => 106.8652,
+            'latitude' => -6.1753,
+            'longitude' => 106.8652,
         ]);
 
         $response->assertCreated();
@@ -91,13 +91,13 @@ class AttendanceTest extends TestCase
         $response = $this->postJson('/api/attendance/check-in', [
             'store_id' => $store->id,
             'shift_store_id' => $shift->id,
-            'image_in' => $this->fakeImageData(),
-            'latitude_in' => -6.0,
-            'longitude_in' => 107.0,
+            'photo' => \Illuminate\Http\UploadedFile::fake()->image('selfie.jpg'),
+            'latitude' => -6.0,
+            'longitude' => 107.0,
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors('latitude_in');
+        $response->assertJsonValidationErrors('latitude');
     }
 
     public function test_user_cannot_check_in_twice_without_checking_out(): void
@@ -118,17 +118,17 @@ class AttendanceTest extends TestCase
         $this->postJson('/api/attendance/check-in', [
             'store_id' => $store->id,
             'shift_store_id' => $shift->id,
-            'image_in' => $this->fakeImageData(),
-            'latitude_in' => -6.1751,
-            'longitude_in' => 106.8650,
+            'photo' => \Illuminate\Http\UploadedFile::fake()->image('selfie.jpg'),
+            'latitude' => -6.1751,
+            'longitude' => 106.8650,
         ])->assertCreated();
 
         $response = $this->postJson('/api/attendance/check-in', [
             'store_id' => $store->id,
             'shift_store_id' => $shift->id,
-            'image_in' => $this->fakeImageData(),
-            'latitude_in' => -6.1751,
-            'longitude_in' => 106.8650,
+            'photo' => \Illuminate\Http\UploadedFile::fake()->image('selfie2.jpg'),
+            'latitude' => -6.1751,
+            'longitude' => 106.8650,
         ]);
 
         $response->assertStatus(422);
@@ -153,18 +153,19 @@ class AttendanceTest extends TestCase
         $checkInResponse = $this->postJson('/api/attendance/check-in', [
             'store_id' => $store->id,
             'shift_store_id' => $shift->id,
-            'image_in' => $this->fakeImageData(),
-            'latitude_in' => -6.1751,
-            'longitude_in' => 106.8650,
+            'photo' => \Illuminate\Http\UploadedFile::fake()->image('selfie.jpg'),
+            'latitude' => -6.1751,
+            'longitude' => 106.8650,
         ])->assertCreated();
 
         $attendanceId = $checkInResponse->json('attendance.id');
 
-        $checkOutResponse = $this->postJson("/api/attendance/{$attendanceId}/check-out", [
+        $checkOutResponse = $this->postJson('/api/attendance/check-out', [
+            'attendance_id' => $attendanceId,
             'store_id' => $store->id,
-            'image_out' => $this->fakeImageData(),
-            'latitude_out' => -6.1752,
-            'longitude_out' => 106.8651,
+            'photo' => \Illuminate\Http\UploadedFile::fake()->image('checkout.jpg'),
+            'latitude' => -6.1752,
+            'longitude' => 106.8651,
         ]);
 
         $checkOutResponse->assertOk();
@@ -275,7 +276,7 @@ class AttendanceTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonCount(1, 'data');
-        $response->assertJsonPath('data.0.created_by_id', $user->id);
+        $response->assertJsonPath('data.0.created_by_id', (string) $user->id);
     }
 
     private function fakeImageData(): string

@@ -1,23 +1,27 @@
 <?php
 
+$defaultDevOrigins = [
+    'http://localhost:3000',    // Next.js Admin Web
+    'http://127.0.0.1:3000',    // Next.js Admin Web
+    'http://localhost:3002',    // Next.js Admin Web (alternative port)
+    'http://127.0.0.1:3002',    // Next.js Admin Web (alternative port)
+    'http://localhost:3003',    // Next.js Admin Web (alternative port)
+    'http://127.0.0.1:3003',    // Next.js Admin Web (alternative port)
+    'http://localhost:8081',    // React Native POS/Presence (jika berjalan di web)
+    'http://127.0.0.1:8081',    // React Native POS/Presence (jika berjalan di web)
+    'http://localhost:19006',   // Expo Go
+    'http://127.0.0.1:19006',   // Expo Go
+    'https://admin.sagansa.id', // Production Admin Web
+    'https://pos.sagansa.id',   // Production POS
+    'https://presence.sagansa.id', // Production Presence
+    'https://*.sagansa.id',     // Wildcard subdomains
+];
+
 $rawFrontendOrigins = array_filter(
     array_map('trim', explode(',', (string) env('FRONTEND_URLS', env('FRONTEND_URL'))))
 );
 
-$defaultDevOrigins = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:3001',
-    'http://127.0.0.1:3001',
-];
-
-$allowedOrigins = $rawFrontendOrigins;
-
-if ($allowedOrigins === []) {
-    $allowedOrigins = env('APP_ENV') === 'production'
-        ? ['https://yourdomain.com']
-        : $defaultDevOrigins;
-}
+$allowedOrigins = array_values(array_unique(array_merge($defaultDevOrigins, $rawFrontendOrigins)));
 
 return [
 
@@ -34,11 +38,10 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['*'],
 
     'allowed_methods' => ['*'],
 
-    // Allow fine-grained origin control in production while keeping dev permissive
     'allowed_origins' => $allowedOrigins,
 
     'allowed_origins_patterns' => [],
@@ -49,6 +52,6 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => false,
+    'supports_credentials' => env('CORS_SUPPORTS_CREDENTIALS', false),
 
 ];

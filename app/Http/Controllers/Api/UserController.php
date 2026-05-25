@@ -1,0 +1,359 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Models\Tenant;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
+use Spatie\Permission\Models\Role;
+
+class UserController extends Controller
+{
+    /**
+     * Display a listing of users
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Only super-admin can access global users endpoint
+        if (!$user->hasRole('super-admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only super-admin can access this endpoint'
+            ], 403);
+        }
+        
+        // Check permission
+        if (!$user->can('access-backoffice')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to view users'
+            ], 403);
+        }
+        
+        $query = User::with(['tenant', 'roles', 'tenants']);
+        
+        // Filter by tenant for non-super-admin users
+        if (!$user->hasRole('super-admin')) {
+            $query->where('tenant_id', $user->tenant_id);
+        }
+        
+        // Apply filters
+        if ($request->has('search')) {
+            $search = $request->get('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
+        
+        if ($request->has('role')) {
+            $query->whereHas('roles', function ($q) use ($request) {
+                $q->where('name', $request->get('role'));
+            });
+        }
+        
+        if ($request->has('tenant_id') && $user->hasRole('super-admin')) {
+            $query->where('tenant_id', $request->get('tenant_id'));
+        }
+        
+        $users = $query->paginate($request->get('per_page', 15));
+        
+        return response()->json([
+            'success' => true,
+            'users' => $users->items(),
+            'meta' => [
+                'current_page' => $users->currentPage(),
+                'total_pages' => $users->lastPage(),
+                'total_items' => $users->total(),
+                'per_page' => $users->perPage(),
+            ]
+        ]);
+    }
+
+    /**
+     * Display the specified user
+     */
+    public function show(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Only super-admin can access global users endpoint
+        if (!$user->hasRole('super-admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only super-admin can access this endpoint'
+            ], 403);
+        }
+        
+        // Check permission
+        if (!$user->can('access-backoffice')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to view users'
+            ], 403);
+        }
+        
+        $targetUser = User::with(['tenant', 'roles', 'permissions'])->find($id);
+        
+        if (!$targetUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        }
+        
+        // Check access
+        if (!$user->hasRole('super-admin') && $targetUser->tenant_id !== $user->tenant_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to view this user'
+            ], 403);
+        }
+        
+        return response()->json([
+            'success' => true,
+            'user' => $targetUser
+        ]);
+    }
+
+    /**
+     * Create a new user
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Only super-admin can create global users
+        if (!$user->hasRole('super-admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only super-admin can access this endpoint'
+            ], 403);
+        }
+        
+        // Check permission
+        if (!$user->can('access-backoffice')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to create users'
+            ], 403);
+        }
+        
+        $rules = [
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:mysql_auth.users,email',
+            'password' => 'required|string|min:8',
+            'role' => 'required|string|exists:roles,name',
+        ];
+        
+        // Super admin can assign any tenant
+        if ($user->hasRole('super-admin')) {
+            $rules['tenant_id'] = 'required|uuid|exists:tenants,id';
+        } else {
+            // Regular admin can only create users in their own tenant
+            $request->merge(['tenant_id' => $user->tenant_id]);
+        }
+        
+        $validated = $request->validate($rules);
+        
+        // Create user
+        $newUser = User::create([
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'password' => Hash::make($validated['password']),
+            'tenant_id' => $validated['tenant_id'],
+        ]);
+        
+        // Assign role
+        $newUser->assignRole($validated['role']);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'User created successfully',
+            'user' => $newUser->load(['tenant', 'roles'])
+        ], 201);
+    }
+
+    /**
+     * Update the specified user
+     */
+    public function update(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Only super-admin can update global users
+        if (!$user->hasRole('super-admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only super-admin can access this endpoint'
+            ], 403);
+        }
+        
+        // Check permission
+        if (!$user->can('access-backoffice')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to update users'
+            ], 403);
+        }
+        
+        $targetUser = User::find($id);
+        
+        if (!$targetUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        }
+        
+        // Check access
+        if (!$user->hasRole('super-admin') && $targetUser->tenant_id !== $user->tenant_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to update this user'
+            ], 403);
+        }
+        
+        $rules = [
+            'name' => 'sometimes|required|string|max:255',
+            'email' => ['sometimes', 'required', 'email', Rule::unique('users')->ignore($targetUser->id)],
+            'password' => 'sometimes|required|string|min:8',
+            'role' => 'sometimes|required|string|exists:roles,name',
+        ];
+        
+        // Super admin can change tenant and role
+        if ($user->hasRole('super-admin')) {
+            $rules['tenant_id'] = 'sometimes|required|uuid|exists:tenants,id';
+        }
+        
+        $validated = $request->validate($rules);
+
+        if (!$user->hasRole('super-admin') && isset($validated['role']) && $validated['role'] === 'super-admin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to assign super-admin role'
+            ], 403);
+        }
+        
+        // Update user
+        if (isset($validated['password'])) {
+            $validated['password'] = Hash::make($validated['password']);
+        }
+        
+        $targetUser->update($validated);
+        
+        // Update role if provided
+        if (isset($validated['role'])) {
+            $targetUser->syncRoles([$validated['role']]);
+        }
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'User updated successfully',
+            'user' => $targetUser->load(['tenant', 'roles'])
+        ]);
+    }
+
+    /**
+     * Delete the specified user
+     */
+    public function destroy(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Only super-admin can delete global users
+        if (!$user->hasRole('super-admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only super-admin can access this endpoint'
+            ], 403);
+        }
+        
+        // Check permission
+        if (!$user->can('access-backoffice')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to delete users'
+            ], 403);
+        }
+        
+        $targetUser = User::find($id);
+        
+        if (!$targetUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        }
+        
+        // Check access
+        if (!$user->hasRole('super-admin') && $targetUser->tenant_id !== $user->tenant_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to delete this user'
+            ], 403);
+        }
+        
+        // Prevent deleting yourself
+        if ($targetUser->id === $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete your own account'
+            ], 400);
+        }
+        
+        $targetUser->delete();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'User deleted successfully'
+        ]);
+    }
+    /**
+     * Toggle user active status
+     */
+    public function toggleStatus(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Only super-admin can toggle status
+        if (!$user->hasRole('super-admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only super-admin can perform this action'
+            ], 403);
+        }
+        
+        $targetUser = User::find($id);
+        
+        if (!$targetUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        }
+        
+        // Prevent deactivating yourself
+        if ($targetUser->id === $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot change status of your own account'
+            ], 400);
+        }
+        
+        $targetUser->is_active = !$targetUser->is_active;
+        $targetUser->save();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'User status updated successfully',
+            'user' => $targetUser
+        ]);
+    }
+}

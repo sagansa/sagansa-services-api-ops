@@ -29,6 +29,14 @@ class AttendanceController extends Controller
     {
         $user = $request->user();
 
+        // Debug logging
+        \Log::info('Attendance index request', [
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'roles' => $user->roles->pluck('name')->toArray(),
+            'has_admin_roles' => $user->hasAnyRole(['admin', 'super-admin'])
+        ]);
+
         $validated = $request->validate([
             'store_id' => ['nullable', 'uuid', Rule::exists('stores', 'id')],
             'shift_store_id' => ['nullable', 'uuid', Rule::exists('shift_stores', 'id')],
@@ -38,8 +46,29 @@ class AttendanceController extends Controller
 
         $query = Attendance::query()->with(['store', 'shiftStore', 'creator', 'approver']);
 
-        if (! $user->hasAnyRole(['admin', 'super-admin'])) {
+        // Filter by active tenant if set by middleware
+        if ($activeTenantId = $request->attributes->get('current_tenant_id')) {
+            $query->whereHas('store', function ($q) use ($activeTenantId) {
+                $q->where('tenant_id', $activeTenantId);
+            });
+        } else {
+            // Fallback: All accessible tenants
+            $tenantIds = $this->resolveAccessibleTenantIds($user);
+            if (! empty($tenantIds)) {
+                $query->whereHas('store', function ($q) use ($tenantIds) {
+                    $q->whereIn('tenant_id', $tenantIds);
+                });
+            }
+        }
+
+        // Check if user is admin, super-admin, or owner of their tenant
+        $isOwner = $user->tenant && $user->tenant->owner_id === $user->id;
+        
+        if (! $user->hasAnyRole(['admin', 'super-admin']) && !$isOwner) {
             $query->where('created_by_id', $user->id);
+            \Log::info('Applied user filter for non-admin user');
+        } else {
+            \Log::info('No user filter applied for admin/owner user');
         }
 
         if (! empty($validated['store_id'])) {
@@ -56,10 +85,24 @@ class AttendanceController extends Controller
 
         $perPage = (int) ($validated['per_page'] ?? 15);
 
+        // Debug: Get total count before pagination
+        $totalCount = $query->count();
+        \Log::info('Attendance query debug', [
+            'total_count' => $totalCount,
+            'sql' => \DB::getQueryLog()
+        ]);
+
         $attendances = $query
             ->latest('created_at')
             ->paginate($perPage)
             ->appends($request->query());
+
+        \Log::info('Attendance pagination result', [
+            'total' => $attendances->total(),
+            'per_page' => $attendances->perPage(),
+            'current_page' => $attendances->currentPage(),
+            'items' => $attendances->items()
+        ]);
 
         return AttendanceResource::collection($attendances);
     }
@@ -116,7 +159,7 @@ class AttendanceController extends Controller
     {
         $user = $request->user();
 
-        if ($attendance->created_by_id !== $user->id && ! $user->hasAnyRole(['admin', 'super-admin'])) {
+        if ($attendance->created_by_id !== $user->id && ! $user->hasAnyRole(['admin', 'super-admin', 'owner'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'Anda tidak dapat melakukan check-out untuk presensi ini.',
@@ -173,7 +216,7 @@ class AttendanceController extends Controller
     {
         $user = $request->user();
 
-        if (! $user->hasAnyRole(['admin', 'super-admin'])) {
+        if (! $user->hasAnyRole(['admin', 'super-admin', 'owner'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'You are not authorised to approve attendance records.',
@@ -196,14 +239,192 @@ class AttendanceController extends Controller
         ]);
     }
 
-    private function ensureNoOpenAttendance(User $user): void
+    /**
+     * Wrapper for admin-web-next compatibility - returns attendance list with 'data' key
+     */
+    public function indexCompat(Request $request): JsonResponse
     {
-        $hasOpenAttendance = Attendance::query()
+        $attendances = $this->index($request);
+        
+        // Get the underlying paginator from the resource collection
+        $paginator = $attendances->resource;
+        
+        return response()->json([
+            'success' => true,
+            'data' => $attendances->map(function ($attendance) use ($request) {
+                return (new AttendanceResource($attendance))->toArray($request);
+            }),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'from' => $paginator->firstItem(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'to' => $paginator->lastItem(),
+                'total' => $paginator->total(),
+            ]
+        ]);
+    }
+
+    /**
+     * Wrapper for admin-web-next compatibility - check-in with simplified response
+     */
+    public function checkInCompat(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Validate data from form data (mobile app compatibility)
+        $validated = $request->validate([
+            'store_id' => 'required|uuid|exists:stores,id',
+            'shift_store_id' => 'nullable|uuid|exists:shift_stores,id',
+            'photo' => 'required|image|max:5120', // 5MB max
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy' => 'nullable|numeric|min:0',
+            'notes' => 'nullable|string|max:500',
+            'check_in' => 'nullable|date',
+        ]);
+
+        $store = Store::findOrFail($validated['store_id']);
+        $shiftStore = $validated['shift_store_id'] ? ShiftStore::findOrFail($validated['shift_store_id']) : null;
+
+        $this->ensureUserCanAccessTenant($user, $store->tenant_id, 'store_id');
+        if ($shiftStore) {
+            $this->ensureUserCanAccessTenant($user, $shiftStore->tenant_id, 'shift_store_id');
+        }
+        $this->ensureNoOpenAttendance($user);
+        $this->assertStoreHasLocation($store);
+        $this->assertWithinAllowedRadius($store, (float) $validated['latitude'], (float) $validated['longitude'], 'latitude');
+
+        $checkInAt = !empty($validated['check_in'])
+            ? CarbonImmutable::parse($validated['check_in'], config('app.timezone'))
+            : CarbonImmutable::now(config('app.timezone'));
+
+        $wasLate = false;
+        if ($shiftStore) {
+            $wasLate = $this->determineLateness($checkInAt, $shiftStore);
+        }
+
+        // Handle photo upload
+        $photoPath = null;
+        if ($request->hasFile('photo')) {
+            $photoPath = $request->file('photo')->store('presence/selfies', 'public');
+        }
+
+        // Create attendance record
+        $attendance = Attendance::create([
+            'store_id' => $validated['store_id'],
+            'check_in_store_id' => $validated['store_id'],
+            'shift_store_id' => $validated['shift_store_id'],
+            'status' => 'pending',
+            'presence_type' => 'checkin',
+            'image_in' => $photoPath,
+            'check_in' => $checkInAt,
+            'latitude_in' => $validated['latitude'],
+            'longitude_in' => $validated['longitude'],
+            'gps_accuracy' => $validated['accuracy'] ?? null,
+            'device_info' => null,
+            'ip_address' => $request->ip(),
+            'is_within_range' => true,
+            'distance_to_store' => $this->calculateDistanceInMeters($store->latitude, $store->longitude, (float) $validated['latitude'], (float) $validated['longitude']),
+            'was_late' => $wasLate,
+            'created_by_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Check-in successful',
+            'attendance' => (new AttendanceResource($attendance))->toArray($request)
+        ], 201);
+    }
+
+    /**
+     * Wrapper for admin-web-next compatibility - check-out with simplified response
+     */
+    public function checkOutCompat(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Validate attendance_id from form data (mobile app compatibility)
+        $validated = $request->validate([
+            'attendance_id' => 'required|uuid|exists:attendances,id',
+            'store_id' => 'required|uuid|exists:stores,id',
+            'photo' => 'nullable|image|max:5120', // 5MB max
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'accuracy' => 'nullable|numeric|min:0',
+            'notes' => 'nullable|string|max:500',
+            'check_out' => 'nullable|date',
+        ]);
+
+        // Find the attendance
+        $attendance = Attendance::where('id', $validated['attendance_id'])
             ->where('created_by_id', $user->id)
             ->whereNull('check_out')
-            ->exists();
+            ->firstOrFail();
 
-        if ($hasOpenAttendance) {
+        $store = Store::findOrFail($validated['store_id']);
+
+        $this->assertStoreHasLocation($store);
+        $this->assertWithinAllowedRadius($store, (float) $validated['latitude'], (float) $validated['longitude'], 'latitude');
+
+        $checkOutAt = !empty($validated['check_out'])
+            ? CarbonImmutable::parse($validated['check_out'], config('app.timezone'))
+            : CarbonImmutable::now(config('app.timezone'));
+
+        // Handle photo upload
+        $photoPath = null;
+        if ($request->hasFile('photo')) {
+            $photoPath = $request->file('photo')->store('presence/selfies', 'public');
+        }
+
+        // Update attendance record
+        $attendance->update([
+            'check_out_store_id' => $validated['store_id'],
+            'status' => 'approved',
+            'image_out' => $photoPath,
+            'check_out' => $checkOutAt,
+            'latitude_out' => $validated['latitude'],
+            'longitude_out' => $validated['longitude'],
+            'gps_accuracy' => $validated['accuracy'] ?? null,
+            'distance_to_store' => $this->calculateDistanceInMeters($store->latitude, $store->longitude, (float) $validated['latitude'], (float) $validated['longitude']),
+            'is_within_range' => true,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Check-out successful',
+            'attendance' => (new AttendanceResource($attendance))->toArray($request)
+        ], 200);
+    }
+
+    private function ensureNoOpenAttendance(User $user): void
+    {
+        $openAttendance = Attendance::query()
+            ->where('created_by_id', $user->id)
+            ->whereNull('check_out')
+            ->first();
+
+        if ($openAttendance) {
+            // Check if passed auto-checkout threshold
+            $hours = (int) config('attendance.auto_checkout_after_hours', 4);
+            $checkInTime = $openAttendance->check_in ?? $openAttendance->created_at;
+            
+            // If the open attendance is older than the threshold, close it automatically (Lazy Auto-Checkout)
+            if ($checkInTime->addHours($hours)->isPast()) {
+                $checkOutAt = $checkInTime->addHours($hours);
+                
+                $openAttendance->forceFill([
+                    'status' => Attendance::STATUS_APPROVED,
+                    'check_out' => $checkOutAt,
+                    'auto_checked_out_at' => now(), // Mark that it was auto-closed now
+                    'approved_by_id' => null,
+                ])->save();
+
+                \Log::info("Lazy auto-checkout applied for attendance ID: {$openAttendance->id}");
+                return; // Allow the new check-in to proceed
+            }
+
+            // Otherwise, it's still a valid active session, block check-in
             throw ValidationException::withMessages([
                 'attendance' => 'Anda masih memiliki presensi yang belum check-out.',
             ]);
@@ -337,5 +558,33 @@ class AttendanceController extends Controller
                 $field => 'Jenis file gambar tidak didukung. Gunakan JPG atau PNG.',
             ]),
         };
+    }
+
+    /**
+     * Resolve the tenant IDs accessible by the authenticated user.
+     */
+    private function resolveAccessibleTenantIds($user): array
+    {
+        $tenantIds = collect();
+
+        if (! empty($user->tenant_id)) {
+            $tenantIds->push($user->tenant_id);
+        }
+
+        if ($user->ownedTenant) {
+            $tenantIds->push($user->ownedTenant->id);
+        }
+
+        // Check if tenants relationship exists before accessing
+        if (method_exists($user, 'tenants')) {
+            $membershipTenantIds = $user->tenants()->pluck('tenants.id');
+            $tenantIds = $tenantIds->merge($membershipTenantIds);
+        }
+
+        return $tenantIds
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 }

@@ -13,6 +13,8 @@ class Tenant extends Model
 {
     use HasFactory, HasUuids;
 
+    protected $connection = 'mysql_auth';
+
     /**
      * The attributes that are mass assignable.
      *
@@ -21,6 +23,12 @@ class Tenant extends Model
     protected $fillable = [
         'name',
         'owner_id',
+        'operation_mode',
+        'foodcourt_config',
+    ];
+
+    protected $casts = [
+        'foodcourt_config' => 'array',
     ];
 
     /**
@@ -28,7 +36,7 @@ class Tenant extends Model
      */
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class)
+        return $this->belongsToMany(User::class, 'tenant_user', 'tenant_id', 'user_id', 'id', 'uuid')
             ->withPivot(['role', 'assigned_by'])
             ->withTimestamps();
     }
@@ -38,7 +46,7 @@ class Tenant extends Model
      */
     public function owner(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'owner_id');
+        return $this->belongsTo(User::class, 'owner_id', 'uuid');
     }
 
     /**
@@ -55,5 +63,29 @@ class Tenant extends Model
     public function shiftStores(): HasMany
     {
         return $this->hasMany(ShiftStore::class);
+    }
+
+    /**
+     * Printers registered under the tenant.
+     */
+    public function printers(): HasMany
+    {
+        return $this->hasMany(Printer::class);
+    }
+
+    /**
+     * Orders associated with the tenant.
+     */
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
+    }
+
+    /**
+     * Offline sync logs for the tenant.
+     */
+    public function offlineSyncLogs(): HasMany
+    {
+        return $this->hasMany(OfflineSyncLog::class);
     }
 }

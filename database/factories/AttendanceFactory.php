@@ -19,9 +19,12 @@ class AttendanceFactory extends Factory
     {
         $checkIn = CarbonImmutable::parse($this->faker->dateTimeBetween('-1 week', 'now', config('app.timezone')));
         $checkOut = $checkIn->addHours(random_int(6, 10));
+        $store = Store::factory();
 
         return [
-            'store_id' => Store::factory(),
+            'store_id' => $store,
+            'check_in_store_id' => $store,
+            'check_out_store_id' => null,
             'shift_store_id' => null,
             'status' => Attendance::STATUS_PENDING,
             'was_late' => false,

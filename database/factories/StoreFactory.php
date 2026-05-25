@@ -19,7 +19,7 @@ class StoreFactory extends Factory
             'tenant_id' => Tenant::factory(),
             'name' => $this->faker->company() . ' Store',
             'nickname' => $this->faker->companySuffix(),
-            'no_telp' => $this->faker->optional()->phoneNumber(),
+            'phone' => $this->faker->optional()->phoneNumber(),
             'email' => $this->faker->unique()->companyEmail(),
             'status' => 'active',
             'radius' => 100,

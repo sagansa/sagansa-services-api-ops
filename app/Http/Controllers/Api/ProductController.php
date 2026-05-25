@@ -7,9 +7,11 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 class ProductController extends Controller
 {
@@ -18,7 +20,24 @@ class ProductController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Product::query()->orderByDesc('created_at');
+        \Log::info('ProductController::index called', [
+            'store_id' => $request->input('store_id'),
+            'user' => $request->user()?->email,
+        ]);
+        
+        $query = Product::query()
+            ->with([
+                'unit',
+                'categoryRelation',
+                'tenant',
+                'user',
+                'stores',
+                'stores',
+                'variantGroups.variants',
+                'variantCombinations',
+                'modifications',
+            ])
+            ->orderByDesc('created_at');
 
         $user = $request->user();
         $includeInactive = $request->boolean('include_inactive');
@@ -27,12 +46,50 @@ class ProductController extends Controller
             $query->where('is_active', true);
         }
 
+        if ($user && ! $user->hasRole('super-admin') && ! $user->hasRole('admin')) {
+            $tenantIds = $this->resolveAccessibleTenantIds($user);
+
+            if (empty($tenantIds)) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->whereIn('tenant_id', $tenantIds);
+            }
+        }
+
+        // Filter by store_id if provided (for POS)
+        if ($request->has('store_id')) {
+            $storeId = $request->input('store_id');
+            \Log::info('Filtering by store_id', ['store_id' => $storeId]);
+            $query->whereHas('stores', function ($q) use ($storeId) {
+                $q->where('stores.id', $storeId);
+            });
+        }
+
         $products = $query->get();
+
+        \Log::info('Products query result:', [
+            'count' => $products->count(),
+            'first_product' => $products->first()?->name,
+            'first_product_variant_groups_count' => $products->first()?->variantGroups->count(),
+            'first_product_combinations_count' => $products->first()?->variantCombinations->count(),
+            'first_product_modifications_count' => $products->first()?->modifications->count(),
+        ]);
+
+        $resource = ProductResource::collection($products)->resolve();
+        
+        \Log::info('ProductResource result:', [
+            'count' => count($resource),
+            'first_has_variant_groups' => isset($resource[0]['variant_groups']),
+            'first_has_combinations' => isset($resource[0]['variant_combinations']),
+            'first_has_modifications' => isset($resource[0]['modifications']),
+        ]);
 
         return response()->json([
             'success' => true,
-            'products' => ProductResource::collection($products),
-        ]);
+            'products' => $resource,
+        ])->header('Cache-Control', 'no-cache, no-store, must-revalidate')
+          ->header('Pragma', 'no-cache')
+          ->header('Expires', '0');
     }
 
     /**
@@ -41,19 +98,57 @@ class ProductController extends Controller
     public function store(StoreProductRequest $request): JsonResponse
     {
         $data = $request->validated();
+        $user = $request->user();
         $data['stock'] = $data['stock'] ?? 0;
+        $data['request'] = isset($data['request']) ? (bool) $data['request'] : false;
+        $data['remaining'] = isset($data['remaining'])
+            ? (bool) $data['remaining']
+            : ($data['stock'] ?? 0) > 0;
         $data['is_active'] = $data['is_active'] ?? true;
+        $data['user_id'] = $data['user_id'] ?? $user?->uuid;
+        $data['tenant_id'] = $data['tenant_id'] ?? $user?->tenant_id;
+
+        $this->ensureOpsTenantExists($data['tenant_id'] ?? null);
+        $this->ensureOpsUserExists($user);
 
         if ($request->hasFile('image')) {
-            $data['image_path'] = $request->file('image')->store('products', 'public');
+            $path = $request->file('image')->store('products', 'public');
+            $data['image'] = $path;
         }
 
-        $product = Product::create($data);
+        $payloadVariantGroups = $request->input('variant_groups', []);
+        $payloadVariants = $request->input('variants', []);
+        $payloadModifications = $request->input('modifications', []);
+        $storeAssignments = $request->input('stores');
+        $storeIds = $storeAssignments ?? $request->input('store_ids');
+
+        unset($data['stores'], $data['store_ids'], $data['variants'], $data['variant_groups'], $data['modifications']);
+
+        $product = DB::transaction(function () use ($data, $payloadVariantGroups, $payloadVariants, $payloadModifications, $storeIds) {
+            $product = Product::create($data);
+
+            $this->syncVariantGroups($product, $payloadVariantGroups);
+            $this->generateCombinations($product, $payloadVariants); // Generate combinations after variant groups
+            $this->syncModifications($product, $payloadModifications);
+            $this->syncStores($product, $storeIds);
+
+            return $product;
+        });
 
         return response()->json([
             'success' => true,
             'message' => 'Product created successfully.',
-            'product' => new ProductResource($product),
+            'product' => (new ProductResource($product->load([
+                'unit',
+                'categoryRelation',
+                'tenant',
+                'user',
+                'stores',
+                'stores',
+                'variantGroups.variants',
+                'variantCombinations',
+                'modifications',
+            ])))->resolve(),
         ], 201);
     }
 
@@ -63,6 +158,17 @@ class ProductController extends Controller
     public function show(Request $request, string $product): JsonResponse
     {
         $productModel = Product::query()
+            ->with([
+                'unit',
+                'categoryRelation',
+                'tenant',
+                'user',
+                'stores',
+                'stores',
+                'variantGroups.variants',
+                'variantCombinations',
+                'modifications',
+            ])
             ->where('id', $product)
             ->orWhere('slug', $product)
             ->firstOrFail();
@@ -78,7 +184,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'product' => new ProductResource($productModel),
+            'product' => (new ProductResource($productModel))->resolve(),
         ]);
     }
 
@@ -89,19 +195,69 @@ class ProductController extends Controller
     {
         $data = $request->validated();
 
-        if ($request->hasFile('image')) {
-            if ($product->image_path) {
-                Storage::disk('public')->delete($product->image_path);
+        if ($request->boolean('remove_image')) {
+            if ($product->image) {
+                Storage::disk('public')->delete($product->image);
             }
-            $data['image_path'] = $request->file('image')->store('products', 'public');
+            $data['image'] = null;
+        } elseif ($request->hasFile('image')) {
+            if ($product->image) {
+                Storage::disk('public')->delete($product->image);
+            }
+            $path = $request->file('image')->store('products', 'public');
+            $data['image'] = $path;
         }
 
-        $product->update($data);
+        if (array_key_exists('request', $data)) {
+            $data['request'] = (bool) $data['request'];
+        }
+
+        if (array_key_exists('remaining', $data)) {
+            $data['remaining'] = (bool) $data['remaining'];
+        }
+
+        $payloadVariantGroups = $request->has('variant_groups') ? $request->input('variant_groups', []) : null;
+        $payloadVariants = $request->has('variants') ? $request->input('variants', []) : null;
+        $payloadModifications = $request->has('modifications') ? $request->input('modifications', []) : null;
+        $storeAssignments = $request->has('stores') ? $request->input('stores') : null;
+        $storeIds = $storeAssignments ?? ($request->has('store_ids') ? $request->input('store_ids') : null);
+
+        unset($data['stores'], $data['store_ids'], $data['variants'], $data['variant_groups'], $data['modifications']);
+
+        $product = DB::transaction(function () use ($product, $data, $payloadVariantGroups, $payloadVariants, $payloadModifications, $storeIds) {
+            $product->update($data);
+
+            if ($payloadVariantGroups !== null) {
+                $this->syncVariantGroups($product, $payloadVariantGroups);
+                \Log::info('Calling generateCombinations with variants:', ['count' => count($payloadVariants ?? [])]);
+                $this->generateCombinations($product, $payloadVariants); // Regenerate combinations when variant groups change
+            }
+
+            if ($payloadModifications !== null) {
+                $this->syncModifications($product, $payloadModifications);
+            }
+
+            if ($storeIds !== null) {
+                $this->syncStores($product, $storeIds);
+            }
+
+            return $product;
+        });
 
         return response()->json([
             'success' => true,
             'message' => 'Product updated successfully.',
-            'product' => new ProductResource($product->refresh()),
+            'product' => (new ProductResource($product->refresh()->load([
+                'unit',
+                'categoryRelation',
+                'tenant',
+                'user',
+                'stores',
+                'stores',
+                'variantGroups.variants',
+                'variantCombinations',
+                'modifications',
+            ])))->resolve(),
         ]);
     }
 
@@ -110,15 +266,358 @@ class ProductController extends Controller
      */
     public function destroy(Product $product): JsonResponse
     {
-        if ($product->image_path) {
-            Storage::disk('public')->delete($product->image_path);
-        }
+        $product->load([
+            'unit',
+            'categoryRelation',
+            'tenant',
+            'user',
+            'stores',
+            'stores',
+            'variantGroups.variants',
+            'variantCombinations',
+            'modifications',
+        ]);
 
         $product->delete();
 
         return response()->json([
             'success' => true,
             'message' => 'Product deleted successfully.',
+            'product' => (new ProductResource($product))->resolve(),
         ]);
+    }
+
+    /**
+     * Resolve the tenant IDs accessible by the authenticated user.
+     */
+    private function resolveAccessibleTenantIds($user): array
+    {
+        $tenantIds = collect();
+
+        if (! empty($user->tenant_id)) {
+            $tenantIds->push($user->tenant_id);
+        }
+
+        if ($user->ownedTenant) {
+            $tenantIds->push($user->ownedTenant->id);
+        }
+
+        $membershipTenantIds = $user->tenants()->pluck('tenants.id');
+
+        return $tenantIds
+            ->merge($membershipTenantIds)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function ensureOpsTenantExists(?string $tenantId): void
+    {
+        if (!$tenantId) {
+            return;
+        }
+
+        $authTenant = DB::connection('mysql_auth')
+            ->table('tenants')
+            ->where('id', $tenantId)
+            ->first();
+
+        if (!$authTenant) {
+            return;
+        }
+
+        DB::connection('mysql_ops')
+            ->table('tenants')
+            ->updateOrInsert(
+                ['id' => $authTenant->id],
+                [
+                    'name' => $authTenant->name,
+                    'operation_mode' => $authTenant->operation_mode ?? 'standard',
+                    'foodcourt_config' => $authTenant->foodcourt_config ?? null,
+                    'owner_id' => null,
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
+    }
+
+    private function ensureOpsUserExists(?User $user): void
+    {
+        if (!$user?->uuid) {
+            return;
+        }
+
+        DB::connection('mysql_ops')
+            ->table('users')
+            ->updateOrInsert(
+                ['id' => $user->uuid],
+                [
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'password' => $user->getAuthPassword(),
+                    'email_verified_at' => $user->email_verified_at,
+                    'is_active' => $user->is_active,
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
+    }
+
+    private function syncVariantGroups(Product $product, $groups): void
+    {
+        if (is_string($groups)) {
+            $decoded = json_decode($groups, true);
+            $groups = is_array($decoded) ? $decoded : [];
+        }
+
+        if (! is_array($groups)) {
+            $groups = [];
+        }
+
+        // Delete existing groups (and cascades to variants)
+        // In a real app, you might want to be smarter about updates to preserve IDs
+        $product->variantGroups()->delete();
+
+        if ($groups === []) {
+            return;
+        }
+
+        foreach ($groups as $index => $groupData) {
+            if (empty($groupData['name'])) continue;
+
+            $group = $product->variantGroups()->create([
+                'name' => $groupData['name'],
+                'is_required' => $groupData['is_required'] ?? false,
+                'order' => $groupData['order'] ?? $index,
+            ]);
+
+            if (!empty($groupData['variants']) && is_array($groupData['variants'])) {
+                $variants = collect($groupData['variants'])
+                    ->filter(fn ($v) => !empty($v['name']))
+                    ->map(function ($v) use ($product) {
+                        return [
+                            'product_id' => $product->id,
+                            'name' => $v['name'],
+                            'sku' => isset($v['sku']) && $v['sku'] !== '' ? $v['sku'] : null,
+                            'price' => isset($v['price']) ? (int) $v['price'] : null,
+                            'stock' => isset($v['stock']) ? (int) $v['stock'] : 0,
+                            'is_active' => array_key_exists('is_active', $v) ? (bool) $v['is_active'] : true,
+                            'available_with_variants' => $v['available_with_variants'] ?? null,
+                        ];
+                    })
+                    ->all();
+
+                if (!empty($variants)) {
+                    $group->variants()->createMany($variants);
+                }
+            }
+        }
+    }
+
+    private function syncModifications(Product $product, $modifications): void
+    {
+        if (is_string($modifications)) {
+            $decoded = json_decode($modifications, true);
+            $modifications = is_array($decoded) ? $decoded : [];
+        }
+
+        if (! is_array($modifications)) {
+            $modifications = [];
+        }
+
+        if ($modifications === []) {
+            $product->modifications()->delete();
+            return;
+        }
+
+        $product->modifications()->delete();
+
+        $prepared = collect($modifications)
+            ->filter(fn ($modification) => ! empty($modification['name']))
+            ->map(function ($modification) {
+                return [
+                    'name' => $modification['name'],
+                    'price' => isset($modification['price']) ? (int) $modification['price'] : 0,
+                    'is_active' => array_key_exists('is_active', $modification)
+                        ? (bool) $modification['is_active']
+                        : true,
+                ];
+            })
+            ->values()
+            ->all();
+
+        if ($prepared !== []) {
+            $product->modifications()->createMany($prepared);
+        }
+    }
+
+    private function syncStores(Product $product, $storeAssignments): void
+    {
+        if (is_null($storeAssignments)) {
+            return;
+        }
+
+        // Debug logging
+        \Log::info('syncStores called with:', ['storeAssignments' => $storeAssignments]);
+
+        if (is_string($storeAssignments)) {
+            $decoded = json_decode($storeAssignments, true);
+            $storeAssignments = is_array($decoded) ? $decoded : [];
+            \Log::info('Decoded JSON:', ['storeAssignments' => $storeAssignments]);
+        }
+
+        if (! is_array($storeAssignments)) {
+            $storeAssignments = [];
+        }
+
+        $syncData = collect($storeAssignments)
+            ->map(function ($entry) use ($product) {
+                if (is_array($entry)) {
+                    $storeId = $entry['id'] ?? $entry['store_id'] ?? $entry['storeId'] ?? null;
+                    if (! $storeId) {
+                        return null;
+                    }
+
+                    $price = $entry['price'] ?? null;
+                    \Log::info('Processing store entry:', ['entry' => $entry, 'price_raw' => $price]);
+                    
+                    // If price is null, empty string, or 0, use product default price
+                    if ($price === '' || $price === null || $price === 0 || $price === '0') {
+                        $price = $product->price;
+                    } else {
+                        $price = (int) round((float) $price);
+                    }
+
+                    return [
+                        'id' => (string) $storeId,
+                        'price' => $price,
+                    ];
+                }
+
+                if ($entry === null || $entry === '') {
+                    return null;
+                }
+
+                return [
+                    'id' => (string) $entry,
+                    'price' => $product->price, // Use product default price
+                ];
+            })
+            ->filter()
+            ->unique('id')
+            ->values()
+            ->all();
+
+        \Log::info('Final syncData:', ['syncData' => $syncData]);
+
+        $product->stores()->sync(collect($syncData)->mapWithKeys(function ($row) {
+            return [
+                $row['id'] => ['price' => $row['price']],
+            ];
+        })->all());
+    }
+
+    /**
+     * Generate all possible combinations from variant groups (Cartesian product)
+     */
+    private function generateCombinations(Product $product, ?array $payloadCombinations = null): void
+    {
+        \Log::info('generateCombinations started', ['payload_count' => count($payloadCombinations ?? [])]);
+
+        // Delete existing combinations
+        $product->variantCombinations()->delete();
+        
+        // Load variant groups with variants
+        $variantGroups = $product->variantGroups()->orderBy('order')->with('variants')->get();
+        
+        // If no variant groups, nothing to generate
+        if ($variantGroups->isEmpty()) {
+            return;
+        }
+        
+        // Get arrays of variant IDs per group
+        $groupedVariantIds = $variantGroups->map(function ($group) {
+            return $group->variants->pluck('id')->toArray();
+        })->filter(fn($ids) => !empty($ids))->values()->all();
+        
+        // If any group has no variants, skip combination generation
+        if (empty($groupedVariantIds)) {
+            return;
+        }
+        
+        // Generate cartesian product of all variant IDs
+        $combinations = $this->cartesianProduct($groupedVariantIds);
+        
+        // Create combination records
+        foreach ($combinations as $variantIdCombo) {
+            // Get variant details for display name
+            // We need to maintain the order of groups to ensure consistent naming
+            // The $variantIdCombo is already in the order of $groupedVariantIds (which is group order)
+            
+            // Fetch all variants at once to avoid N+1, but we need to map them back to the order
+            $variants = \App\Models\ProductVariant::whereIn('id', $variantIdCombo)->get();
+            
+            // Reorder variants based on the order in $variantIdCombo
+            $orderedVariants = collect($variantIdCombo)->map(function ($id) use ($variants) {
+                return $variants->firstWhere('id', $id);
+            });
+            
+            $name = $orderedVariants->pluck('name')->join(' × ');
+            \Log::info("Generated combination name: '$name'");
+            
+            $price = $product->price;
+            $stock = 0;
+            $sku = null;
+            $isActive = true;
+            
+            if ($payloadCombinations) {
+                // Find matching combination in payload by name
+                $match = collect($payloadCombinations)->first(function ($combo) use ($name) {
+                    $payloadName = $combo['name'] ?? 'UNKNOWN';
+                    return $payloadName === $name;
+                });
+                
+                if ($match) {
+                    $price = isset($match['price']) ? (int)$match['price'] : $price;
+                    $stock = isset($match['stock']) ? (int)$match['stock'] : $stock;
+                    $sku = isset($match['sku']) && $match['sku'] !== '' ? $match['sku'] : null;
+                    $isActive = array_key_exists('is_active', $match) ? (bool)$match['is_active'] : $isActive;
+                }
+            }
+            
+            \App\Models\ProductVariantCombination::create([
+                'product_id' => $product->id,
+                'variant_ids' => $variantIdCombo,
+                'name' => $name,
+                'price' => $price,
+                'stock' => $stock,
+                'sku' => $sku,
+                'is_active' => $isActive,
+            ]);
+        }
+    }
+
+    /**
+     * Calculate Cartesian product of arrays
+     * 
+     * @param array $arrays Array of arrays to combine
+     * @return array Array of all possible combinations
+     */
+    private function cartesianProduct(array $arrays): array
+    {
+        $result = [[]];
+        
+        foreach ($arrays as $key => $values) {
+            $temp = [];
+            foreach ($result as $resultItem) {
+                foreach ($values as $value) {
+                    $temp[] = array_merge($resultItem, [$value]);
+                }
+            }
+            $result = $temp;
+        }
+        
+        return $result;
     }
 }

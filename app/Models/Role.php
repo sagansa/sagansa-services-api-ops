@@ -2,8 +2,7 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Spatie\Permission\Contracts\Role as RoleContract;
 use Spatie\Permission\Exceptions\RoleAlreadyExists;
 use Spatie\Permission\Guard;
@@ -12,7 +11,7 @@ use Spatie\Permission\PermissionRegistrar;
 
 class Role extends SpatieRole
 {
-    use HasUuids;
+    protected $connection = 'mysql_auth';
     
     /**
      * @return RoleContract|Role
@@ -38,6 +37,14 @@ class Role extends SpatieRole
         }
 
         return static::query()->create($attributes);
+    }
+    
+    /**
+     * Get the tenant that owns the role.
+     */
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class, 'tenant_id');
     }
     
     protected static function boot()

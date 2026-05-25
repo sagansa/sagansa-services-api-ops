@@ -25,7 +25,7 @@ class AttendanceResource extends JsonResource
                     'id' => $this->store?->id,
                     'name' => $this->store?->name,
                     'nickname' => $this->store?->nickname,
-                    'no_telp' => $this->store?->no_telp,
+                    'phone' => $this->store?->phone,
                     'email' => $this->store?->email,
                     'status' => $this->store?->status,
                     'radius' => $this->store?->radius,
@@ -69,7 +69,7 @@ class AttendanceResource extends JsonResource
                 ],
             ),
             'auto_checked_out_at' => $this->auto_checked_out_at?->toISOString(),
-            'created_by' => $this->whenLoaded('creator', function () {
+            'creator' => $this->whenLoaded('creator', function () {
                 return [
                     'id' => $this->creator?->id,
                     'name' => $this->creator?->name,

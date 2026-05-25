@@ -16,49 +16,48 @@ class RolePermissionSeeder extends Seeder
     {
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
+        // Define simplified permissions
         $permissions = [
-            // User Management Permissions
-            'view-users',
-            'create-users',
-            'update-users',
-            'delete-users',
-
-            // Role Management Permissions
-            'view-roles',
-            'create-roles',
-            'update-roles',
-            'delete-roles',
-
-            // Permission Management Permissions
-            'view-permissions',
-            'assign-permissions',
+            'access-backoffice' => 'Access Backoffice (Admin Web)',
+            'access-pos' => 'Access Point of Sale (POS)',
         ];
 
-        foreach ($permissions as $permission) {
+        // Create all permissions
+        foreach ($permissions as $name => $description) {
             Permission::firstOrCreate([
-                'name' => $permission,
+                'name' => $name,
                 'guard_name' => 'api',
             ]);
         }
 
-        $adminRole = Role::firstOrCreate([
-            'name' => 'admin',
-            'guard_name' => 'api',
-        ]);
-
+        // Create roles
         $superAdminRole = Role::firstOrCreate([
             'name' => 'super-admin',
             'guard_name' => 'api',
         ]);
 
-        $adminRole->syncPermissions([
-            'view-users',
-            'create-users',
-            'update-users',
-            'view-roles',
-            'view-permissions',
+        $ownerRole = Role::firstOrCreate([
+            'name' => 'owner',
+            'guard_name' => 'api',
         ]);
 
+        $userRole = Role::firstOrCreate([
+            'name' => 'user',
+            'guard_name' => 'api',
+        ]);
+
+        // Super Admin: Gets ALL permissions
         $superAdminRole->syncPermissions(Permission::pluck('name')->all());
+
+        // Owner: Gets ALL permissions (same as super-admin for now based on requirement)
+        $ownerRole->syncPermissions([
+            'access-backoffice',
+            'access-pos',
+        ]);
+
+        // User: Gets POS access only by default (can be changed)
+        $userRole->syncPermissions([
+            'access-pos',
+        ]);
     }
 }

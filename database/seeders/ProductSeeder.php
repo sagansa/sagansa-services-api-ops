@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Product;
+use App\Models\Store;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -85,18 +86,71 @@ class ProductSeeder extends Seeder
             $slug = Str::slug($attributes['name']);
             $imagePath = $this->ensureImageExists($slug, $attributes['name'], $attributes['category'], $attributes['color']);
 
-            Product::updateOrCreate(
+            $requestQuantity = random_int(0, 1) === 1;
+            $remainingQuantity = random_int(0, 1) === 1;
+            $sku = strtoupper(Str::slug($attributes['name'], '-')) . '-' . strtoupper(Str::random(4));
+            $barcode = 'BC' . str_pad((string) random_int(1_000_000, 9_999_999), 7, '0', STR_PAD_LEFT);
+
+            $product = Product::updateOrCreate(
                 ['slug' => $slug],
                 [
                     'name' => $attributes['name'],
                     'description' => $attributes['description'],
                     'price' => $attributes['price'],
-                    'category' => $attributes['category'],
                     'stock' => $attributes['stock'],
+                    'request' => $requestQuantity,
+                    'remaining' => $remainingQuantity,
                     'is_active' => true,
-                    'image_path' => $imagePath,
+                    'image' => $imagePath,
+                    'sku' => $sku,
+                    'barcode' => $barcode,
                 ]
             );
+
+            $product->variants()->delete();
+            $product->modifications()->delete();
+
+            $product->variants()->createMany([
+                [
+                    'name' => 'Standard Pack',
+                    'sku' => $sku . '-STD',
+                    'price' => $attributes['price'],
+                    'stock' => max(0, (int) floor($attributes['stock'] * 0.6)),
+                    'is_active' => true,
+                ],
+                [
+                    'name' => 'Bulk Pack',
+                    'sku' => $sku . '-BLK',
+                    'price' => (int) round($attributes['price'] * 1.8),
+                    'stock' => max(0, (int) floor($attributes['stock'] * 0.4)),
+                    'is_active' => true,
+                ],
+            ]);
+
+            $product->modifications()->createMany([
+                [
+                    'name' => 'Gift Wrap',
+                    'price' => 15000,
+                    'is_active' => true,
+                ],
+                [
+                    'name' => 'Express Handling',
+                    'price' => 25000,
+                    'is_active' => true,
+                ],
+            ]);
+
+            $storesForProduct = Store::inRandomOrder()->limit(2)->get();
+            if ($storesForProduct->isNotEmpty()) {
+                $product->stores()->sync(
+                    $storesForProduct->mapWithKeys(function (Store $store) use ($attributes) {
+                        $ratio = mt_rand(90, 120) / 100; // random 0.9 - 1.2
+                        $storePrice = (int) round($attributes['price'] * $ratio);
+
+                        return [$store->id => ['price' => $storePrice]];
+                    })->all()
+                );
+            }
         }
     }
 

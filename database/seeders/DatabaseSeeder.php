@@ -14,40 +14,10 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        $this->call(RolePermissionSeeder::class);
-
-        $superAdmin = User::updateOrCreate(
-            ['email' => 'asapanganbangsa@gmail.com'],
-            [
-                'name' => 'Super Admin',
-                'password' => Hash::make('1234567890'),
-                'tenant_id' => null,
-                'manager_id' => null,
-            ]
-        );
-
-        $tenant = Tenant::updateOrCreate(
-            ['name' => 'Headquarters'],
-            [
-                'owner_id' => $superAdmin->id,
-            ]
-        );
-
-        $superAdmin->tenant_id = $tenant->id;
-        $superAdmin->manager_id = null;
-        $superAdmin->save();
-
-        $tenant->users()->syncWithoutDetaching([
-            $superAdmin->id => [
-                'role' => 'owner',
-                'assigned_by' => $superAdmin->id,
-            ],
+        $this->call([
+            RolePermissionSeeder::class,
+            SuperAdminSeeder::class,
+            ProductSeeder::class,
         ]);
-
-        if (! $superAdmin->hasRole('super-admin')) {
-            $superAdmin->assignRole('super-admin');
-        }
-
-        $this->call(ProductSeeder::class);
     }
 }

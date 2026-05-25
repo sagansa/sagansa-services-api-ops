@@ -25,6 +25,8 @@ class Attendance extends Model
      */
     protected $fillable = [
         'store_id',
+        'check_in_store_id',
+        'check_out_store_id',
         'shift_store_id',
         'status',
         'image_in',
@@ -39,6 +41,12 @@ class Attendance extends Model
         'auto_checked_out_at',
         'created_by_id',
         'approved_by_id',
+        // GPS tracking fields
+        'gps_accuracy',
+        'device_info',
+        'ip_address',
+        'is_within_range',
+        'distance_to_store',
     ];
 
     /**
@@ -57,6 +65,10 @@ class Attendance extends Model
             'latitude_out' => 'float',
             'longitude_out' => 'float',
             'auto_checked_out_at' => 'datetime',
+            // New fields for presence system
+            'gps_accuracy' => 'float',
+            'is_within_range' => 'boolean',
+            'distance_to_store' => 'float',
         ];
     }
 
@@ -80,6 +92,22 @@ class Attendance extends Model
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class);
+    }
+
+    /**
+     * Store where check-in occurred.
+     */
+    public function checkInStore(): BelongsTo
+    {
+        return $this->belongsTo(Store::class, 'check_in_store_id');
+    }
+
+    /**
+     * Store where check-out occurred.
+     */
+    public function checkOutStore(): BelongsTo
+    {
+        return $this->belongsTo(Store::class, 'check_out_store_id');
     }
 
     /**
