@@ -15,6 +15,7 @@ $defaultDevOrigins = [
     'https://pos.sagansa.id',   // Production POS
     'https://presence.sagansa.id', // Production Presence
     'https://*.sagansa.id',     // Wildcard subdomains
+    'https://bisque-bison-372440.hostingersite.com/auth/login', // Hostinger (untuk testing sementara)
 ];
 
 $rawFrontendOrigins = array_filter(
