@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\QrisService;
 use Illuminate\Http\Request;
 
 use App\Models\PaymentMethod;
@@ -45,6 +46,7 @@ class PaymentMethodController extends Controller
             'require_proof' => 'boolean',
             'qr_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Max 2MB
             'payment_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Generic image
+            'details.qris_payload' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -63,8 +65,11 @@ class PaymentMethodController extends Controller
             $details = $data['details'] ?? [];
             if (is_string($details)) $details = json_decode($details, true);
             $details['qr_image'] = '/storage/' . $path;
+            $details['qris_source'] = 'uploaded_image';
             $data['details'] = $details;
         }
+
+        $data['details'] = $this->normaliseQrisDetails($data['details'] ?? []);
 
         // Handle Generic Payment Image upload
         if ($request->hasFile('payment_image')) {
@@ -105,6 +110,7 @@ class PaymentMethodController extends Controller
             'require_proof' => 'sometimes|boolean',
             'qr_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Max 2MB
             'payment_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Generic image
+            'details.qris_payload' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -129,8 +135,11 @@ class PaymentMethodController extends Controller
             $details = $data['details'] ?? ($paymentMethod->details ?? []);
             if (is_string($details)) $details = json_decode($details, true);
             $details['qr_image'] = '/storage/' . $path;
+            $details['qris_source'] = 'uploaded_image';
             $data['details'] = $details;
         }
+
+        $data['details'] = $this->normaliseQrisDetails($data['details'] ?? ($paymentMethod->details ?? []));
 
         // Handle Generic Payment Image upload
         if ($request->hasFile('payment_image')) {
@@ -154,6 +163,59 @@ class PaymentMethodController extends Controller
         $paymentMethod->update($data);
 
         return response()->json(['data' => $paymentMethod]);
+    }
+
+    private function normaliseQrisDetails(array|string|null $details): array
+    {
+        if (is_string($details)) {
+            $details = json_decode($details, true) ?: [];
+        }
+
+        if (! is_array($details)) {
+            return [];
+        }
+
+        if (! empty($details['qris_payload'])) {
+            unset($details['qr_image']);
+            unset($details['qr_image_file']);
+            $details['qris_source'] = 'payload';
+            $details['qris_payload'] = trim((string) $details['qris_payload']);
+        }
+
+        return $details;
+    }
+
+    public function qris(Request $request, string $id, QrisService $qrisService)
+    {
+        $paymentMethod = PaymentMethod::findOrFail($id);
+
+        if ($paymentMethod->type !== 'qris') {
+            return response()->json([
+                'message' => 'Payment method is not QRIS.',
+            ], 422);
+        }
+
+        $details = $paymentMethod->details ?? [];
+        $payload = $details['qris_payload'] ?? null;
+
+        if (! $payload) {
+            return response()->json([
+                'message' => 'QRIS payload is not available. Upload a readable QRIS image first.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:1',
+        ]);
+
+        $dynamicPayload = $qrisService->withAmount($payload, $validated['amount']);
+        $svg = $qrisService->toSvg($dynamicPayload);
+
+        return response($svg, 200, [
+            'Content-Type' => 'image/svg+xml',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+            'X-QRIS-Payload' => $dynamicPayload,
+        ]);
     }
 
     public function destroy(string $id)

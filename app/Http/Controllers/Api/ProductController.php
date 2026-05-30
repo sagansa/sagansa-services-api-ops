@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ProductController extends Controller
 {
@@ -318,33 +319,23 @@ class ProductController extends Controller
             return;
         }
 
-        $authTenant = DB::connection('mysql_auth')
+        $tenantExists = DB::connection('mysql_ops')
             ->table('tenants')
             ->where('id', $tenantId)
-            ->first();
+            ->exists();
 
-        if (!$authTenant) {
-            return;
+        if (! $tenantExists) {
+            throw new \RuntimeException('Tenant not found in sagansa_ops.');
         }
-
-        DB::connection('mysql_ops')
-            ->table('tenants')
-            ->updateOrInsert(
-                ['id' => $authTenant->id],
-                [
-                    'name' => $authTenant->name,
-                    'operation_mode' => $authTenant->operation_mode ?? 'standard',
-                    'foodcourt_config' => $authTenant->foodcourt_config ?? null,
-                    'owner_id' => null,
-                    'updated_at' => now(),
-                    'created_at' => now(),
-                ]
-            );
     }
 
     private function ensureOpsUserExists(?User $user): void
     {
         if (!$user?->uuid) {
+            return;
+        }
+
+        if (! Schema::connection('mysql_ops')->hasTable('users')) {
             return;
         }
 

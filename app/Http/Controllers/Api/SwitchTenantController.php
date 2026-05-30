@@ -15,7 +15,7 @@ class SwitchTenantController extends Controller
     public function switchTenant(Request $request)
     {
         $request->validate([
-            'tenant_id' => 'required|uuid|exists:tenants,id',
+            'tenant_id' => 'required|uuid|exists:mysql_ops.tenants,id',
         ]);
 
         $user = $request->user();
@@ -51,7 +51,7 @@ class SwitchTenantController extends Controller
         $user->save();
 
         // Check if user is super-admin before setting tenant context
-        $isSuperAdmin = DB::table('model_has_roles')
+        $isSuperAdmin = DB::connection('mysql_auth')->table('model_has_roles')
             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
             ->where('model_has_roles.model_id', $user->id)
             ->where('model_has_roles.model_type', get_class($user))

@@ -72,7 +72,8 @@ class ProductResource extends JsonResource
                 : [],
             'user' => $this->whenLoaded('user', function () {
                 return [
-                    'id' => $this->user?->id,
+                    'id' => $this->user?->uuid ?: $this->user?->id,
+                    'uuid' => $this->user?->uuid,
                     'name' => $this->user?->name,
                     'email' => $this->user?->email,
                 ];

@@ -28,7 +28,8 @@ class TenantUserController extends Controller
         // Get permissions and roles for each user in this tenant
         $users = $tenant->users->map(function ($user) use ($tenantId) {
             return [
-                'id' => $user->id,
+                'id' => $user->uuid ?: $user->id,
+                'uuid' => $user->uuid,
                 'name' => $user->name,
                 'email' => $user->email,
                 'pivot_role' => $user->pivot->role,
@@ -93,7 +94,8 @@ class TenantUserController extends Controller
             'success' => true,
             'users' => $users->map(function ($user) {
                 return [
-                    'id' => $user->id,
+                    'id' => $user->uuid ?: $user->id,
+                    'uuid' => $user->uuid,
                     'name' => $user->name,
                     'email' => $user->email,
                 ];
@@ -206,7 +208,7 @@ class TenantUserController extends Controller
     public function updateRole(Request $request, string $tenantId, string $userId)
     {
         $tenant = Tenant::findOrFail($tenantId);
-        $user = User::findOrFail($userId);
+        $user = $this->findUserByKey($userId);
         $this->ensureDefaultTenantRoles($tenantId);
 
         if (!$request->user()->hasPermissionInTenant('access-backoffice', $tenantId)) {
@@ -222,14 +224,14 @@ class TenantUserController extends Controller
         }
 
         // Cannot change owner's role
-        if ($tenant->owner_id === $userId) {
+        if ($tenant->owner_id === ($user->uuid ?: $user->id)) {
             return response()->json([
                 'message' => 'Cannot change tenant owner role'
             ], 403);
         }
 
         // Cannot change own role
-        if ($request->user()->id === $userId) {
+        if (($request->user()->uuid ?: $request->user()->id) === ($user->uuid ?: $user->id)) {
             return response()->json([
                 'message' => 'You cannot change your own role'
             ], 403);
@@ -255,7 +257,8 @@ class TenantUserController extends Controller
             return response()->json([
                 'message' => 'Role updated successfully',
                 'user' => [
-                    'id' => $user->id,
+                    'id' => $user->uuid ?: $user->id,
+                    'uuid' => $user->uuid,
                     'name' => $user->name,
                     'role' => $request->role,
                 ],
@@ -269,7 +272,7 @@ class TenantUserController extends Controller
     public function assignPermissions(Request $request, string $tenantId, string $userId)
     {
         $tenant = Tenant::findOrFail($tenantId);
-        $user = User::findOrFail($userId);
+        $user = $this->findUserByKey($userId);
 
         if (!$request->user()->hasPermissionInTenant('access-backoffice', $tenantId)) {
             return response()->json(['message' => 'Unauthorized'], 403);
@@ -305,7 +308,7 @@ class TenantUserController extends Controller
      */
     public function getPermissions()
     {
-        $permissions = DB::connection('mysql')
+        $permissions = DB::connection('mysql_auth')
             ->table('permissions')
             ->where('guard_name', 'api')
             ->orderBy('name')
@@ -425,21 +428,21 @@ class TenantUserController extends Controller
     public function removeUser(Request $request, string $tenantId, string $userId)
     {
         $tenant = Tenant::findOrFail($tenantId);
-        $user = User::findOrFail($userId);
+        $user = $this->findUserByKey($userId);
 
         if (!$request->user()->hasPermissionInTenant('access-backoffice', $tenantId)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
         // Cannot remove tenant owner
-        if ($tenant->owner_id === $userId) {
+        if ($tenant->owner_id === ($user->uuid ?: $user->id)) {
             return response()->json([
                 'message' => 'Cannot remove tenant owner'
             ], 403);
         }
 
         // Cannot remove yourself
-        if ($request->user()->id === $userId) {
+        if (($request->user()->uuid ?: $request->user()->id) === ($user->uuid ?: $user->id)) {
             return response()->json([
                 'message' => 'You cannot remove yourself from the tenant'
             ], 403);
@@ -476,5 +479,13 @@ class TenantUserController extends Controller
                 'message' => 'User removed from tenant successfully'
             ]);
         });
+    }
+
+    private function findUserByKey(string $key): User
+    {
+        return User::query()
+            ->where('uuid', $key)
+            ->orWhere('id', $key)
+            ->firstOrFail();
     }
 }

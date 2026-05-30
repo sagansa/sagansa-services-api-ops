@@ -48,7 +48,7 @@ class UpdateProductRequest extends FormRequest
             'remaining' => ['sometimes', 'nullable', 'boolean'],
             'unit_id' => ['sometimes', 'nullable', 'uuid', 'exists:units,id'],
             'category_id' => ['sometimes', 'nullable', 'uuid', 'exists:categories,id'],
-            'user_id' => ['sometimes', 'nullable', 'uuid', 'exists:users,id'],
+            'user_id' => ['sometimes', 'nullable', 'uuid'],
             'is_active' => ['sometimes', 'boolean'],
             'image' => ['sometimes', 'image', 'max:5120'],
             'variants' => ['sometimes', 'array'],

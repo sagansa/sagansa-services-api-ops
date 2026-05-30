@@ -92,7 +92,7 @@ class AuthController extends Controller
         $plainTextToken = $token->plainTextToken;
 
         // Check if user is super-admin (global role) before setting tenant context
-        $isSuperAdmin = \Illuminate\Support\Facades\DB::table('model_has_roles')
+        $isSuperAdmin = \Illuminate\Support\Facades\DB::connection('mysql_auth')->table('model_has_roles')
             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
             ->where('model_has_roles.model_id', $user->id)
             ->where('model_has_roles.model_type', get_class($user))
@@ -206,7 +206,7 @@ class AuthController extends Controller
         }
         
         // Check if user is super-admin (global role) before setting tenant context
-        $isSuperAdmin = \Illuminate\Support\Facades\DB::table('model_has_roles')
+        $isSuperAdmin = \Illuminate\Support\Facades\DB::connection('mysql_auth')->table('model_has_roles')
             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
             ->where('model_has_roles.model_id', $user->id)
             ->where('model_has_roles.model_type', get_class($user))
@@ -243,7 +243,7 @@ class AuthController extends Controller
             'roles_count' => $user->roles->count(),
             'roles_names' => $roles,
             'guard_name_method' => $user->guardName(),
-            'raw_role_check' => \Illuminate\Support\Facades\DB::table('model_has_roles')
+            'raw_role_check' => \Illuminate\Support\Facades\DB::connection('mysql_auth')->table('model_has_roles')
                 ->where('model_id', $user->id)
                 ->where('model_type', get_class($user))
                 ->get(),
@@ -274,7 +274,7 @@ class AuthController extends Controller
         $user = $request->user();
 
         // Check if user is super-admin (global role) before setting tenant context
-        $isSuperAdmin = \Illuminate\Support\Facades\DB::table('model_has_roles')
+        $isSuperAdmin = \Illuminate\Support\Facades\DB::connection('mysql_auth')->table('model_has_roles')
             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
             ->where('model_has_roles.model_id', $user->id)
             ->where('model_has_roles.model_type', get_class($user))

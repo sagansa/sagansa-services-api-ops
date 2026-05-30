@@ -13,7 +13,7 @@ class Tenant extends Model
 {
     use HasFactory, HasUuids;
 
-    protected $connection = 'mysql_auth';
+    protected $connection = 'mysql_ops';
 
     /**
      * The attributes that are mass assignable.
@@ -36,7 +36,7 @@ class Tenant extends Model
      */
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class, 'tenant_user', 'tenant_id', 'user_id', 'id', 'uuid')
+        return $this->belongsToMany(User::class, $this->authTable('tenant_user'), 'tenant_id', 'user_id', 'id', 'uuid')
             ->withPivot(['role', 'assigned_by'])
             ->withTimestamps();
     }
@@ -87,5 +87,12 @@ class Tenant extends Model
     public function offlineSyncLogs(): HasMany
     {
         return $this->hasMany(OfflineSyncLog::class);
+    }
+
+    private function authTable(string $table): string
+    {
+        $database = config('database.connections.mysql_auth.database');
+
+        return $database ? "{$database}.{$table}" : $table;
     }
 }

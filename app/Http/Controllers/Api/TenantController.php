@@ -58,11 +58,14 @@ class TenantController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:255',
-            'owner_id' => 'required|string',
+            'owner_id' => 'nullable|string',
             'operation_mode' => 'nullable|in:standard,foodcourt',
         ]);
 
-        $owner = $this->findUserByIdOrUuid($request->owner_id);
+        // Default owner to authenticated user if not provided
+        $owner = $request->owner_id
+            ? $this->findUserByIdOrUuid($request->owner_id)
+            : $request->user();
 
         if (!$owner) {
             return response()->json([
@@ -72,27 +75,30 @@ class TenantController extends Controller
         }
 
         try {
-            DB::beginTransaction();
+            $tenant = DB::connection('mysql_ops')->transaction(function () use ($request, $owner) {
+                return Tenant::create([
+                    'name' => $request->name,
+                    'owner_id' => $owner->uuid,
+                    'operation_mode' => $request->operation_mode ?? 'standard',
+                ]);
+            });
 
-            $tenant = Tenant::create([
-                'name' => $request->name,
-                'owner_id' => $owner->uuid,
-                'operation_mode' => $request->operation_mode ?? 'standard',
-            ]);
+            DB::connection('mysql_auth')->transaction(function () use ($tenant, $owner) {
+                // Assign the owner to the tenant
+                // If the owner is not already associated with the tenant, attach them
+                if (!$tenant->users()->wherePivot('user_id', $owner->uuid)->exists()) {
+                    $tenant->users()->attach($owner->uuid, [
+                        'role' => 'owner',
+                        'assigned_by' => $owner->uuid,
+                    ]);
+                }
 
-            // Assign the owner to the tenant
-            // If the owner is not already associated with the tenant, attach them
-            if (!$tenant->users()->wherePivot('user_id', $owner->uuid)->exists()) {
-                $tenant->users()->attach($owner->uuid, ['role' => 'admin']);
-            }
-
-            // Also update the user's current tenant_id if not set
-            if (!$owner->tenant_id) {
-                $owner->tenant_id = $tenant->id;
-                $owner->save();
-            }
-
-            DB::commit();
+                // Also update the user's current tenant_id if not set
+                if (!$owner->tenant_id) {
+                    $owner->tenant_id = $tenant->id;
+                    $owner->save();
+                }
+            });
 
             return response()->json([
                 'success' => true,
@@ -101,7 +107,6 @@ class TenantController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Failed to create tenant: ' . $e->getMessage());
             return response()->json([
                 'success' => false,

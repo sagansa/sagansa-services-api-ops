@@ -85,6 +85,8 @@ class OrderController extends ApiController
 
         try {
             \DB::beginTransaction();
+            $user = $request->user();
+            $userKey = $user ? (string) ($user->uuid ?: $user->id) : null;
 
             $order = Order::create(array_merge(
                 $request->only([
@@ -95,7 +97,7 @@ class OrderController extends ApiController
                 ]),
                 [
                     'tenant_id' => $tenantId,
-                    'created_by' => auth()->id() ?: $request->device_identifier
+                    'created_by' => $userKey ?: $request->device_identifier
                 ]
             ));
 

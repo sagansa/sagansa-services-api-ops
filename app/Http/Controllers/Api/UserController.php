@@ -99,7 +99,7 @@ class UserController extends Controller
             ], 403);
         }
         
-        $targetUser = User::with(['tenant', 'roles', 'permissions'])->find($id);
+        $targetUser = $this->findUserByKey($id, ['tenant', 'roles', 'permissions']);
         
         if (!$targetUser) {
             return response()->json([
@@ -154,7 +154,7 @@ class UserController extends Controller
         
         // Super admin can assign any tenant
         if ($user->hasRole('super-admin')) {
-            $rules['tenant_id'] = 'required|uuid|exists:tenants,id';
+            $rules['tenant_id'] = 'required|uuid|exists:mysql_ops.tenants,id';
         } else {
             // Regular admin can only create users in their own tenant
             $request->merge(['tenant_id' => $user->tenant_id]);
@@ -203,7 +203,7 @@ class UserController extends Controller
             ], 403);
         }
         
-        $targetUser = User::find($id);
+        $targetUser = $this->findUserByKey($id);
         
         if (!$targetUser) {
             return response()->json([
@@ -222,14 +222,14 @@ class UserController extends Controller
         
         $rules = [
             'name' => 'sometimes|required|string|max:255',
-            'email' => ['sometimes', 'required', 'email', Rule::unique('users')->ignore($targetUser->id)],
+            'email' => ['sometimes', 'required', 'email', Rule::unique('mysql_auth.users')->ignore($targetUser->id)],
             'password' => 'sometimes|required|string|min:8',
             'role' => 'sometimes|required|string|exists:roles,name',
         ];
         
         // Super admin can change tenant and role
         if ($user->hasRole('super-admin')) {
-            $rules['tenant_id'] = 'sometimes|required|uuid|exists:tenants,id';
+            $rules['tenant_id'] = 'sometimes|required|uuid|exists:mysql_ops.tenants,id';
         }
         
         $validated = $request->validate($rules);
@@ -283,7 +283,7 @@ class UserController extends Controller
             ], 403);
         }
         
-        $targetUser = User::find($id);
+        $targetUser = $this->findUserByKey($id);
         
         if (!$targetUser) {
             return response()->json([
@@ -330,7 +330,7 @@ class UserController extends Controller
             ], 403);
         }
         
-        $targetUser = User::find($id);
+        $targetUser = $this->findUserByKey($id);
         
         if (!$targetUser) {
             return response()->json([
@@ -340,7 +340,7 @@ class UserController extends Controller
         }
         
         // Prevent deactivating yourself
-        if ($targetUser->id === $user->id) {
+        if (($targetUser->uuid ?: $targetUser->id) === ($user->uuid ?: $user->id)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cannot change status of your own account'
@@ -355,5 +355,14 @@ class UserController extends Controller
             'message' => 'User status updated successfully',
             'user' => $targetUser
         ]);
+    }
+
+    private function findUserByKey(string $key, array $with = []): ?User
+    {
+        return User::query()
+            ->with($with)
+            ->where('uuid', $key)
+            ->orWhere('id', $key)
+            ->first();
     }
 }

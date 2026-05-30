@@ -71,14 +71,16 @@ class AttendanceResource extends JsonResource
             'auto_checked_out_at' => $this->auto_checked_out_at?->toISOString(),
             'creator' => $this->whenLoaded('creator', function () {
                 return [
-                    'id' => $this->creator?->id,
+                    'id' => $this->creator?->uuid ?: $this->creator?->id,
+                    'uuid' => $this->creator?->uuid,
                     'name' => $this->creator?->name,
                     'email' => $this->creator?->email,
                 ];
             }),
             'approved_by' => $this->whenLoaded('approver', function () {
                 return [
-                    'id' => $this->approver?->id,
+                    'id' => $this->approver?->uuid ?: $this->approver?->id,
+                    'uuid' => $this->approver?->uuid,
                     'name' => $this->approver?->name,
                     'email' => $this->approver?->email,
                 ];

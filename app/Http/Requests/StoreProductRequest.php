@@ -39,7 +39,7 @@ class StoreProductRequest extends FormRequest
             'remaining' => ['nullable', 'boolean'],
             'unit_id' => ['nullable', 'uuid', 'exists:units,id'],
             'category_id' => ['nullable', 'uuid', 'exists:categories,id'],
-            'user_id' => ['nullable', 'uuid', 'exists:users,id'],
+            'user_id' => ['nullable', 'uuid'],
             'is_active' => ['nullable', 'boolean'],
             'image' => ['nullable', 'image', 'max:5120'],
             'variants' => ['sometimes', 'array'],

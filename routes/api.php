@@ -75,6 +75,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     // Payment Methods
     Route::get('/payment-methods', [\App\Http\Controllers\Api\PaymentMethodController::class, 'index']);
     Route::post('/payment-methods', [\App\Http\Controllers\Api\PaymentMethodController::class, 'store']);
+    Route::get('/payment-methods/{id}/qris', [\App\Http\Controllers\Api\PaymentMethodController::class, 'qris']);
     Route::get('/payment-methods/{id}', [\App\Http\Controllers\Api\PaymentMethodController::class, 'show']);
     Route::put('/payment-methods/{id}', [\App\Http\Controllers\Api\PaymentMethodController::class, 'update']);
     Route::delete('/payment-methods/{id}', [\App\Http\Controllers\Api\PaymentMethodController::class, 'destroy']);

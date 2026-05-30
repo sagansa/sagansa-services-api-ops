@@ -36,8 +36,9 @@ class PresenceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
         
-        $attendances = Attendance::where('created_by_id', $user->id)
+        $attendances = Attendance::where('created_by_id', $userKey)
             ->with([
                 'checkInStore:id,name,nickname', 
                 'checkOutStore:id,name,nickname', 
@@ -58,8 +59,9 @@ class PresenceController extends Controller
     public function active(Request $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
         
-        $activeAttendance = Attendance::where('created_by_id', $user->id)
+        $activeAttendance = Attendance::where('created_by_id', $userKey)
             ->whereNull('check_out')
             ->with([
                 'checkInStore:id,name,nickname', 
@@ -87,9 +89,10 @@ class PresenceController extends Controller
     public function checkIn(Request $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
         
         // Cek apakah user sudah check-in hari ini di store ini
-        $todayCheckin = Attendance::where('created_by_id', $user->id)
+        $todayCheckin = Attendance::where('created_by_id', $userKey)
             ->where('store_id', $request->store_id)
             ->whereDate('check_in', today())
             ->whereNull('check_out')
@@ -157,7 +160,7 @@ class PresenceController extends Controller
                 'ip_address' => $request->ip(),
                 'is_within_range' => $isWithinRange,
                 'distance_to_store' => $distance,
-                'created_by_id' => $user->id,
+                'created_by_id' => $userKey,
             ]);
 
             DB::commit();
@@ -188,6 +191,7 @@ class PresenceController extends Controller
     public function checkOut(Request $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
         
         $request->validate([
             'attendance_id' => 'required|exists:attendances,id',
@@ -201,7 +205,7 @@ class PresenceController extends Controller
 
         // Cari attendance yang belum check-out
         $attendance = Attendance::where('id', $request->attendance_id)
-            ->where('created_by_id', $user->id)
+            ->where('created_by_id', $userKey)
             ->whereNull('check_out')
             ->first();
 
@@ -279,9 +283,10 @@ class PresenceController extends Controller
     public function show(Request $request, string $attendanceId): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
         
         $attendance = Attendance::where('id', $attendanceId)
-            ->where('created_by_id', $user->id)
+            ->where('created_by_id', $userKey)
             ->with(['store:id,name,nickname', 'shiftStore:id,name'])
             ->first();
 
@@ -296,5 +301,10 @@ class PresenceController extends Controller
             'success' => true,
             'data' => $attendance
         ]);
+    }
+
+    private function userKey($user): string
+    {
+        return (string) ($user->uuid ?: $user->id);
     }
 }

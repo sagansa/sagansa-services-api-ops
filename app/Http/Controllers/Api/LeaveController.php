@@ -18,10 +18,11 @@ class LeaveController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
 
         $validated = $request->validate([
             'status' => ['nullable', Rule::in(Leave::statuses())],
-            'user_id' => ['nullable', 'uuid', Rule::exists('users', 'id')],
+            'user_id' => ['nullable', 'uuid', Rule::exists('mysql_auth.users', 'uuid')],
             'type' => ['nullable', 'string'],
         ]);
 
@@ -32,10 +33,10 @@ class LeaveController extends Controller
             $query->where('tenant_id', $activeTenantId);
         } else {
             // Check if user is admin, super-admin, or owner of their tenant
-            $isOwner = $user->tenant && $user->tenant->owner_id === $user->id;
+            $isOwner = $user->tenant && $user->tenant->owner_id === $userKey;
             
             if (! $user->hasAnyRole(['admin', 'super-admin']) && !$isOwner) {
-                $query->where('user_id', $user->id);
+                $query->where('user_id', $userKey);
             } else {
                 $tenantIds = $this->resolveAccessibleTenantIds($user);
                 if (! empty($tenantIds)) {
@@ -67,6 +68,7 @@ class LeaveController extends Controller
     public function store(Request $request): JsonResponse
     {
         $actor = $request->user();
+        $actorKey = $this->userKey($actor);
 
         $rules = [
             'type' => ['required', 'string', 'max:100'],
@@ -74,16 +76,16 @@ class LeaveController extends Controller
             'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'reason' => ['nullable', 'string'],
         ];
-        $isOwner = $actor->tenant && $actor->tenant->owner_id === $actor->id;
+        $isOwner = $actor->tenant && $actor->tenant->owner_id === $actorKey;
         if ($actor->hasAnyRole(['admin', 'super-admin']) || $isOwner) {
-            $rules['user_id'] = ['required', 'uuid', Rule::exists('users', 'id')];
+            $rules['user_id'] = ['required', 'uuid', Rule::exists('mysql_auth.users', 'uuid')];
         }
         $request->validate($rules);
 
         if (! $actor->hasAnyRole(['admin', 'super-admin', 'owner'])) {
             $targetUser = $actor;
         } else {
-            $targetUser = User::findOrFail($request->input('user_id'));
+            $targetUser = User::where('uuid', $request->input('user_id'))->firstOrFail();
             $tenantIds = $this->resolveAccessibleTenantIds($actor);
             if (! in_array($targetUser->tenant_id, $tenantIds, true)) {
                 return response()->json([
@@ -105,7 +107,7 @@ class LeaveController extends Controller
 
         $leave = Leave::create([
             'tenant_id' => $targetUser->tenant_id,
-            'user_id' => $targetUser->id,
+            'user_id' => $this->userKey($targetUser),
             'type' => $request->input('type'),
             'start_date' => $start->toDateString(),
             'end_date' => $end->toDateString(),
@@ -126,9 +128,10 @@ class LeaveController extends Controller
     public function show(Request $request, Leave $leave): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
 
         if (! $user->hasAnyRole(['admin', 'super-admin', 'owner'])) {
-            if ($leave->user_id !== $user->id) {
+            if ($leave->user_id !== $userKey) {
                 abort(404);
             }
         } else {
@@ -150,7 +153,7 @@ class LeaveController extends Controller
     {
         $actor = $request->user();
 
-        $isOwner = $actor->tenant && $actor->tenant->owner_id === $actor->id;
+        $isOwner = $actor->tenant && $actor->tenant->owner_id === $this->userKey($actor);
         if ($leave->status !== Leave::STATUS_PENDING && ! $actor->hasAnyRole(['admin', 'super-admin']) && !$isOwner) {
             return response()->json([
                 'success' => false,
@@ -221,13 +224,14 @@ class LeaveController extends Controller
     public function updateStatus(Request $request, Leave $leave): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
 
         // 1. Allow Super Admin (Global override)
         if ($user->hasRole('super-admin')) {
              // Authorized
         } 
         // 2. Allow Tenant Owner (Direct DB ownership check)
-        elseif ($leave->tenant && $leave->tenant->owner_id === $user->id) {
+        elseif ($leave->tenant && $leave->tenant->owner_id === $userKey) {
              // Authorized
         }
         // 3. Allow 'owner' role in the specific tenant context
@@ -250,7 +254,7 @@ class LeaveController extends Controller
 
         $leave->forceFill([
             'status' => $status,
-            'approved_by_id' => $user->id,
+            'approved_by_id' => $userKey,
             'approved_at' => $status === Leave::STATUS_APPROVED ? now() : null,
             'rejected_at' => $status === Leave::STATUS_REJECTED ? now() : null,
             'review_notes' => $request->input('review_notes'),
@@ -263,6 +267,11 @@ class LeaveController extends Controller
             'message' => 'Leave status updated successfully.',
             'leave' => (new LeaveResource($leave))->resolve(),
         ]);
+    }
+
+    private function userKey(User $user): string
+    {
+        return (string) ($user->uuid ?: $user->id);
     }
 
     private function resolveAccessibleTenantIds(User $user): array

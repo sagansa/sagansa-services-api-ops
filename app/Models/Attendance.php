@@ -123,7 +123,7 @@ class Attendance extends Model
      */
     public function creator(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'created_by_id');
+        return $this->belongsTo(User::class, 'created_by_id', 'uuid');
     }
 
     /**
@@ -131,6 +131,6 @@ class Attendance extends Model
      */
     public function approver(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'approved_by_id');
+        return $this->belongsTo(User::class, 'approved_by_id', 'uuid');
     }
 }

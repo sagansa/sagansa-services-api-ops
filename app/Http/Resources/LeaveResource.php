@@ -23,7 +23,8 @@ class LeaveResource extends JsonResource
             'tenant_id' => $this->tenant_id,
             'user' => $this->whenLoaded('user', function () {
                 return [
-                    'id' => $this->user?->id,
+                    'id' => $this->user?->uuid ?: $this->user?->id,
+                    'uuid' => $this->user?->uuid,
                     'name' => $this->user?->name,
                     'email' => $this->user?->email,
                 ];
@@ -37,7 +38,8 @@ class LeaveResource extends JsonResource
             'status' => $this->status,
             'approved_by' => $this->whenLoaded('approver', function () {
                 return [
-                    'id' => $this->approver?->id,
+                    'id' => $this->approver?->uuid ?: $this->approver?->id,
+                    'uuid' => $this->approver?->uuid,
                     'name' => $this->approver?->name,
                     'email' => $this->approver?->email,
                 ];

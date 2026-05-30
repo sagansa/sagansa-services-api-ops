@@ -97,7 +97,12 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function attendances(): HasMany
     {
-        return $this->hasMany(Attendance::class, 'user_id', 'uuid');
+        return $this->hasMany(Attendance::class, 'created_by_id', 'uuid');
+    }
+
+    public function approvedAttendances(): HasMany
+    {
+        return $this->hasMany(Attendance::class, 'approved_by_id', 'uuid');
     }
 
     /**
@@ -121,7 +126,7 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function tenants(): BelongsToMany
     {
-        return $this->belongsToMany(Tenant::class, 'tenant_user', 'user_id', 'tenant_id', 'uuid', 'id')
+        return $this->belongsToMany(Tenant::class, $this->authTable('tenant_user'), 'user_id', 'tenant_id', 'uuid', 'id')
             ->withPivot(['role', 'assigned_by'])
             ->withTimestamps();
     }
@@ -416,5 +421,12 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         $this->setPermissionsTeamId($tenantId);
         return $this->roles;
+    }
+
+    private function authTable(string $table): string
+    {
+        $database = config('database.connections.mysql_auth.database');
+
+        return $database ? "{$database}.{$table}" : $table;
     }
 }

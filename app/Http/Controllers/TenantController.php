@@ -6,6 +6,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class TenantController extends ApiController
 {
@@ -25,7 +26,7 @@ class TenantController extends ApiController
     {
         $request->validate([
             'name' => 'required|string|max:255',
-            'owner_id' => 'required|exists:users,id',
+            'owner_id' => ['required', Rule::exists('mysql_auth.users', 'uuid')],
         ]);
 
         try {
@@ -39,7 +40,7 @@ class TenantController extends ApiController
             // Assign the owner to the tenant with admin role
             $tenant->users()->attach($request->owner_id, [
                 'role' => 'admin',
-                'assigned_by' => $request->user()->id
+                'assigned_by' => $request->user()->uuid ?: $request->user()->id
             ]);
 
             DB::commit();
@@ -66,7 +67,7 @@ class TenantController extends ApiController
     {
         $request->validate([
             'name' => 'sometimes|string|max:255',
-            'owner_id' => 'sometimes|exists:users,id',
+            'owner_id' => ['sometimes', Rule::exists('mysql_auth.users', 'uuid')],
         ]);
 
         $tenant->update($request->only(['name', 'owner_id']));

@@ -18,6 +18,7 @@ class OrderController extends Controller
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = (string) ($user->uuid ?: $user->id);
         
         $request->validate([
             'store_id' => 'required|exists:stores,id',
@@ -64,7 +65,7 @@ class OrderController extends Controller
             $order = Order::create([
                 'tenant_id' => $user->tenant_id,
                 'store_id' => $request->store_id,
-                'created_by' => $user->id,
+                'created_by' => $userKey,
                 'customer_name' => $request->customer_name,
                 'table_code' => $request->table_code,
                 'status' => $request->status,

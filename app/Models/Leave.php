@@ -56,11 +56,11 @@ class Leave extends Model
 
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class, 'user_id', 'uuid');
     }
 
     public function approver(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'approved_by_id');
+        return $this->belongsTo(User::class, 'approved_by_id', 'uuid');
     }
 }

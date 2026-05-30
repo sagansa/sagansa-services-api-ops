@@ -45,6 +45,8 @@ class PresenceController extends ApiController
      */
     public function store(Request $request)
     {
+        $userKey = $this->userKey($request->user());
+
         $request->validate([
             'store_id' => 'required|exists:stores,id',
             'shift_store_id' => 'required|exists:shift_stores,id',
@@ -82,7 +84,7 @@ class PresenceController extends ApiController
                 'check_in' => $request->check_in,
                 'latitude_in' => $request->latitude_in,
                 'longitude_in' => $request->longitude_in,
-                'created_by_id' => auth()->id(),
+                'created_by_id' => $userKey,
             ]);
 
             DB::commit();
@@ -114,6 +116,7 @@ class PresenceController extends ApiController
      */
     public function update(Request $request, Attendance $attendance)
     {
+        $userKey = $this->userKey($request->user());
         $tenantId = $this->currentTenantId();
         
         if ($attendance->store->tenant_id !== $tenantId) {
@@ -141,7 +144,7 @@ class PresenceController extends ApiController
             
             if ($request->status !== Attendance::STATUS_PENDING) {
                 // Only update approval info if status is changed from pending
-                $updateData['approved_by_id'] = auth()->id();
+                $updateData['approved_by_id'] = $userKey;
             }
             
             if ($imagePath) {
@@ -234,5 +237,10 @@ class PresenceController extends ApiController
         };
 
         return response()->stream($callback, 200, $headers);
+    }
+
+    private function userKey($user): string
+    {
+        return (string) ($user->uuid ?: $user->id);
     }
 }

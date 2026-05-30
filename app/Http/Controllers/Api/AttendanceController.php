@@ -28,6 +28,7 @@ class AttendanceController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
 
         // Debug logging
         \Log::info('Attendance index request', [
@@ -65,7 +66,7 @@ class AttendanceController extends Controller
         $isOwner = $user->tenant && $user->tenant->owner_id === $user->id;
         
         if (! $user->hasAnyRole(['admin', 'super-admin']) && !$isOwner) {
-            $query->where('created_by_id', $user->id);
+            $query->where('created_by_id', $userKey);
             \Log::info('Applied user filter for non-admin user');
         } else {
             \Log::info('No user filter applied for admin/owner user');
@@ -113,6 +114,7 @@ class AttendanceController extends Controller
     public function checkIn(AttendanceCheckInRequest $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
         $payload = $request->validated();
 
         $store = Store::findOrFail($payload['store_id']);
@@ -140,7 +142,7 @@ class AttendanceController extends Controller
             'check_in' => $checkInAt,
             'latitude_in' => $payload['latitude_in'],
             'longitude_in' => $payload['longitude_in'],
-            'created_by_id' => $user->id,
+            'created_by_id' => $userKey,
         ]);
 
         $attendance->load(['store', 'shiftStore', 'creator', 'approver']);
@@ -158,8 +160,9 @@ class AttendanceController extends Controller
     public function checkOut(AttendanceCheckOutRequest $request, Attendance $attendance): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
 
-        if ($attendance->created_by_id !== $user->id && ! $user->hasAnyRole(['admin', 'super-admin', 'owner'])) {
+        if ($attendance->created_by_id !== $userKey && ! $user->hasAnyRole(['admin', 'super-admin', 'owner'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'Anda tidak dapat melakukan check-out untuk presensi ini.',
@@ -215,6 +218,7 @@ class AttendanceController extends Controller
     public function updateStatus(AttendanceStatusUpdateRequest $request, Attendance $attendance): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
 
         if (! $user->hasAnyRole(['admin', 'super-admin', 'owner'])) {
             return response()->json([
@@ -227,7 +231,7 @@ class AttendanceController extends Controller
 
         $attendance->forceFill([
             'status' => $status,
-            'approved_by_id' => $user->id,
+            'approved_by_id' => $userKey,
         ])->save();
 
         $attendance->load(['store', 'shiftStore', 'creator', 'approver']);
@@ -271,6 +275,7 @@ class AttendanceController extends Controller
     public function checkInCompat(Request $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
         
         // Validate data from form data (mobile app compatibility)
         $validated = $request->validate([
@@ -327,7 +332,7 @@ class AttendanceController extends Controller
             'is_within_range' => true,
             'distance_to_store' => $this->calculateDistanceInMeters($store->latitude, $store->longitude, (float) $validated['latitude'], (float) $validated['longitude']),
             'was_late' => $wasLate,
-            'created_by_id' => $user->id,
+            'created_by_id' => $userKey,
         ]);
 
         return response()->json([
@@ -343,6 +348,7 @@ class AttendanceController extends Controller
     public function checkOutCompat(Request $request): JsonResponse
     {
         $user = $request->user();
+        $userKey = $this->userKey($user);
         
         // Validate attendance_id from form data (mobile app compatibility)
         $validated = $request->validate([
@@ -358,7 +364,7 @@ class AttendanceController extends Controller
 
         // Find the attendance
         $attendance = Attendance::where('id', $validated['attendance_id'])
-            ->where('created_by_id', $user->id)
+            ->where('created_by_id', $userKey)
             ->whereNull('check_out')
             ->firstOrFail();
 
@@ -400,7 +406,7 @@ class AttendanceController extends Controller
     private function ensureNoOpenAttendance(User $user): void
     {
         $openAttendance = Attendance::query()
-            ->where('created_by_id', $user->id)
+            ->where('created_by_id', $this->userKey($user))
             ->whereNull('check_out')
             ->first();
 
@@ -516,7 +522,7 @@ class AttendanceController extends Controller
 
         [$extension, $binary] = $this->decodeBase64Image($rawImage, $field);
 
-        $filename = sprintf('attendance/%s-%s-%s.%s', $prefix, $user->id, Str::uuid(), $extension);
+        $filename = sprintf('attendance/%s-%s-%s.%s', $prefix, $this->userKey($user), Str::uuid(), $extension);
 
         Storage::disk('public')->put($filename, $binary);
 
@@ -558,6 +564,11 @@ class AttendanceController extends Controller
                 $field => 'Jenis file gambar tidak didukung. Gunakan JPG atau PNG.',
             ]),
         };
+    }
+
+    private function userKey(User $user): string
+    {
+        return (string) ($user->uuid ?: $user->id);
     }
 
     /**
