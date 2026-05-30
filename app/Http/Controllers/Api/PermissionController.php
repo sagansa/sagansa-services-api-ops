@@ -3,9 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Permission;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Str;
-use Spatie\Permission\Models\Permission;
 
 class PermissionController extends Controller
 {
@@ -28,7 +29,7 @@ class PermissionController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'name' => 'required|string|unique:permissions,name',
+            'name' => ['required', 'string', Rule::unique('mysql_auth.permissions', 'name')],
             'guard_name' => 'sometimes|string',
         ]);
 
@@ -54,7 +55,7 @@ class PermissionController extends Controller
         $permission = Permission::findOrFail($id);
 
         $request->validate([
-            'name' => 'sometimes|required|string|unique:permissions,name,' . $id,
+            'name' => ['sometimes', 'required', 'string', Rule::unique('mysql_auth.permissions', 'name')->ignore($id)],
         ]);
 
         $permission->update($request->only(['name']));

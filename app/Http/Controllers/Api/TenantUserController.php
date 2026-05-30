@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class TenantUserController extends Controller
 {
@@ -120,7 +121,14 @@ class TenantUserController extends Controller
 
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
-            'role' => 'required|string|in:' . implode(',', array_keys($this->defaultTenantRolePermissions())),
+            'role' => [
+                'required',
+                'string',
+                Rule::in(array_keys($this->defaultTenantRolePermissions())),
+                Rule::exists('mysql_auth.roles', 'name')->where(function ($query) use ($tenantId) {
+                    return $query->where('tenant_id', $tenantId);
+                }),
+            ],
         ]);
 
         if ($validator->fails()) {
@@ -216,7 +224,14 @@ class TenantUserController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'role' => 'required|string|in:' . implode(',', array_keys($this->defaultTenantRolePermissions())),
+            'role' => [
+                'required',
+                'string',
+                Rule::in(array_keys($this->defaultTenantRolePermissions())),
+                Rule::exists('mysql_auth.roles', 'name')->where(function ($query) use ($tenantId) {
+                    return $query->where('tenant_id', $tenantId);
+                }),
+            ],
         ]);
 
         if ($validator->fails()) {
@@ -280,7 +295,7 @@ class TenantUserController extends Controller
 
         $validator = Validator::make($request->all(), [
             'permissions' => 'required|array',
-            'permissions.*' => 'string|exists:permissions,name',
+            'permissions.*' => 'string|exists:mysql_auth.permissions,name',
         ]);
 
         if ($validator->fails()) {
@@ -349,10 +364,10 @@ class TenantUserController extends Controller
 
             $query = Role::with(['permissions', 'tenant'])
                 ->where('tenant_id', $user?->tenant_id)
-                ->whereNotIn('name', ['owner', 'super-admin']);
+                ->whereIn('name', array_keys($this->defaultTenantRolePermissions()));
         } else {
             $query = Role::with(['permissions', 'tenant'])
-                ->where('name', '!=', 'super-admin');
+                ->whereIn('name', array_keys($this->defaultTenantRolePermissions()));
         }
         
         $roles = $query->get()->map(function ($role) {
@@ -413,12 +428,9 @@ class TenantUserController extends Controller
     private function defaultTenantRolePermissions(): array
     {
         return [
-            'owner' => ['access-backoffice', 'access-pos'],
-            'admin' => ['access-backoffice', 'access-pos'],
             'manager' => ['access-backoffice', 'access-pos'],
-            'support' => ['access-backoffice'],
             'kasir' => ['access-pos'],
-            'member' => ['access-pos'],
+            'support' => ['access-backoffice'],
         ];
     }
 

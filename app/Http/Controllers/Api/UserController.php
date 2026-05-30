@@ -149,7 +149,7 @@ class UserController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:mysql_auth.users,email',
             'password' => 'required|string|min:8',
-            'role' => 'required|string|exists:roles,name',
+            'role' => 'required|string|exists:mysql_auth.roles,name',
         ];
         
         // Super admin can assign any tenant
@@ -224,7 +224,7 @@ class UserController extends Controller
             'name' => 'sometimes|required|string|max:255',
             'email' => ['sometimes', 'required', 'email', Rule::unique('mysql_auth.users')->ignore($targetUser->id)],
             'password' => 'sometimes|required|string|min:8',
-            'role' => 'sometimes|required|string|exists:roles,name',
+            'role' => 'sometimes|required|string|exists:mysql_auth.roles,name',
         ];
         
         // Super admin can change tenant and role
