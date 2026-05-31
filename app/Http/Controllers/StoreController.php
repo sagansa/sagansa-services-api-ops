@@ -34,8 +34,8 @@ class StoreController extends ApiController
             'email' => 'nullable|email|max:255',
             'status' => 'required|in:active,inactive',
             'radius' => 'required|integer|min:1',
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
+            'latitude' => 'nullable|numeric',
+            'longitude' => 'nullable|numeric',
         ]);
 
         $tenantId = $this->currentTenantId();
@@ -84,8 +84,8 @@ class StoreController extends ApiController
             'email' => 'nullable|email|max:255',
             'status' => 'sometimes|in:active,inactive',
             'radius' => 'sometimes|integer|min:1',
-            'latitude' => 'sometimes|numeric',
-            'longitude' => 'sometimes|numeric',
+            'latitude' => 'sometimes|nullable|numeric',
+            'longitude' => 'sometimes|nullable|numeric',
         ]);
 
         $store->update($request->only([

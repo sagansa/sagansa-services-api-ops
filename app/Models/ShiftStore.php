@@ -13,7 +13,7 @@ class ShiftStore extends Model
 {
     use HasFactory, HasUuids;
 
-    protected $connection = 'mysql';
+    protected $connection = 'mysql_ops';
 
     /**
      * The attributes that are mass assignable.

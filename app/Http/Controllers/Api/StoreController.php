@@ -69,8 +69,8 @@ class StoreController extends Controller
             'email' => 'nullable|email|max:255',
             'status' => 'nullable|in:active,inactive', // Optional in request but will have default value
             'radius' => 'nullable|integer|min:1', // Optional in request but will have default value
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
+            'latitude' => 'nullable|numeric',
+            'longitude' => 'nullable|numeric',
         ]);
 
         $tenantId = $request->attributes->get('current_tenant_id') ?? $user->tenant_id;
@@ -114,8 +114,8 @@ class StoreController extends Controller
             'email' => 'nullable|email|max:255',
             'status' => 'nullable|in:active,inactive', // Optional in request but will have default value
             'radius' => 'nullable|integer|min:1', // Optional in request but will have default value
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
+            'latitude' => 'nullable|numeric',
+            'longitude' => 'nullable|numeric',
         ]);
 
         $this->ensureOpsTenantExists($tenantId);
@@ -191,8 +191,8 @@ class StoreController extends Controller
             'email' => 'nullable|email|max:255',
             'status' => 'sometimes|in:active,inactive',
             'radius' => 'nullable|integer|min:1',
-            'latitude' => 'sometimes|required|numeric',
-            'longitude' => 'sometimes|required|numeric',
+            'latitude' => 'sometimes|nullable|numeric',
+            'longitude' => 'sometimes|nullable|numeric',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'tax_name' => 'nullable|string|max:50',
             'tax_type' => 'nullable|in:exclusive,inclusive',
@@ -291,8 +291,8 @@ class StoreController extends Controller
             'email' => 'nullable|email|max:255',
             'status' => 'sometimes|in:active,inactive',
             'radius' => 'nullable|integer|min:1',
-            'latitude' => 'sometimes|required|numeric',
-            'longitude' => 'sometimes|required|numeric',
+            'latitude' => 'sometimes|nullable|numeric',
+            'longitude' => 'sometimes|nullable|numeric',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'tax_name' => 'nullable|string|max:50',
             'tax_type' => 'nullable|in:exclusive,inclusive',
