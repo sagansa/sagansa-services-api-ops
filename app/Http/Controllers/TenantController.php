@@ -37,11 +37,20 @@ class TenantController extends ApiController
                 'owner_id' => $request->owner_id,
             ]);
 
-            // Assign the owner to the tenant with admin role
-            $tenant->users()->attach($request->owner_id, [
-                'role' => 'admin',
-                'assigned_by' => $request->user()->uuid ?: $request->user()->id
-            ]);
+            DB::connection('mysql_ops')
+                ->table('tenant_user')
+                ->updateOrInsert(
+                    [
+                        'tenant_id' => $tenant->id,
+                        'user_id' => $request->owner_id,
+                    ],
+                    [
+                        'role' => 'owner',
+                        'assigned_by' => $request->user()->uuid ?: $request->user()->id,
+                        'updated_at' => now(),
+                        'created_at' => now(),
+                    ]
+                );
 
             DB::commit();
 
@@ -57,7 +66,7 @@ class TenantController extends ApiController
      */
     public function show(Tenant $tenant)
     {
-        return response()->json($tenant->load('owner', 'stores', 'users'));
+        return response()->json($tenant->load('owner', 'stores'));
     }
 
     /**

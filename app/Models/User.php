@@ -126,7 +126,7 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function tenants(): BelongsToMany
     {
-        return $this->belongsToMany(Tenant::class, $this->authTable('tenant_user'), 'user_id', 'tenant_id', 'uuid', 'id')
+        return $this->belongsToMany(Tenant::class, $this->opsTable('tenant_user'), 'user_id', 'tenant_id', 'uuid', 'id')
             ->withPivot(['role', 'assigned_by'])
             ->withTimestamps();
     }
@@ -426,6 +426,13 @@ class User extends Authenticatable implements MustVerifyEmail
     private function authTable(string $table): string
     {
         $database = config('database.connections.mysql_auth.database');
+
+        return $database ? "{$database}.{$table}" : $table;
+    }
+
+    private function opsTable(string $table): string
+    {
+        $database = config('database.connections.mysql_ops.database');
 
         return $database ? "{$database}.{$table}" : $table;
     }

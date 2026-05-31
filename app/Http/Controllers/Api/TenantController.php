@@ -21,7 +21,9 @@ class TenantController extends Controller
 
         // If super-admin, return all tenants
         if ($user->hasRole('super-admin')) {
-            $tenants = Tenant::with(['owner', 'stores'])->withCount('users')->get();
+            $tenants = Tenant::with(['owner', 'stores'])->get();
+            $tenants->each(fn (Tenant $tenant) => $this->attachUsersCount($tenant));
+
             return response()->json([
                 'success' => true,
                 'tenants' => $tenants
@@ -42,7 +44,7 @@ class TenantController extends Controller
 
         $allTenants->each(function (Tenant $tenant) {
             $tenant->load(['owner', 'stores']);
-            $tenant->loadCount('users');
+            $this->attachUsersCount($tenant);
         });
 
         return response()->json([
@@ -83,15 +85,22 @@ class TenantController extends Controller
                 ]);
             });
 
-            DB::connection('mysql_auth')->transaction(function () use ($tenant, $owner) {
+            DB::connection('mysql_ops')->transaction(function () use ($tenant, $owner) {
                 // Assign the owner to the tenant
-                // If the owner is not already associated with the tenant, attach them
-                if (!$tenant->users()->wherePivot('user_id', $owner->uuid)->exists()) {
-                    $tenant->users()->attach($owner->uuid, [
-                        'role' => 'owner',
-                        'assigned_by' => $owner->uuid,
-                    ]);
-                }
+                DB::connection('mysql_ops')
+                    ->table('tenant_user')
+                    ->updateOrInsert(
+                        [
+                            'tenant_id' => $tenant->id,
+                            'user_id' => $owner->uuid,
+                        ],
+                        [
+                            'role' => 'owner',
+                            'assigned_by' => $owner->uuid,
+                            'updated_at' => now(),
+                            'created_at' => now(),
+                        ]
+                    );
 
                 // Also update the user's current tenant_id if not set
                 if (!$owner->tenant_id) {
@@ -121,7 +130,8 @@ class TenantController extends Controller
      */
     public function show(string $id)
     {
-        $tenant = Tenant::with(['owner', 'stores'])->withCount('users')->findOrFail($id);
+        $tenant = Tenant::with(['owner', 'stores'])->findOrFail($id);
+        $this->attachUsersCount($tenant);
         
         // Authorization check could go here
         
@@ -163,10 +173,20 @@ class TenantController extends Controller
 
                 $data['owner_id'] = $newOwner->uuid;
                 
-                // Ensure new owner is attached to tenant
-                if (!$tenant->users()->wherePivot('user_id', $newOwner->uuid)->exists()) {
-                    $tenant->users()->attach($newOwner->uuid, ['role' => 'admin']);
-                }
+                DB::connection('mysql_ops')
+                    ->table('tenant_user')
+                    ->updateOrInsert(
+                        [
+                            'tenant_id' => $tenant->id,
+                            'user_id' => $newOwner->uuid,
+                        ],
+                        [
+                            'role' => 'owner',
+                            'assigned_by' => $request->user()->uuid,
+                            'updated_at' => now(),
+                            'created_at' => now(),
+                        ]
+                    );
                 
                 // Update owner's current tenant if needed
                 if (!$newOwner->tenant_id) {
@@ -308,5 +328,13 @@ class TenantController extends Controller
     private function tenantIsOwnedByUser(Tenant $tenant, User $user): bool
     {
         return in_array((string) $tenant->owner_id, $this->userOwnerKeys($user), true);
+    }
+
+    private function attachUsersCount(Tenant $tenant): void
+    {
+        $tenant->users_count = DB::connection('mysql_ops')
+            ->table('tenant_user')
+            ->where('tenant_id', $tenant->id)
+            ->count();
     }
 }

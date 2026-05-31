@@ -310,7 +310,6 @@ class AuthController extends Controller
             'roles:id,name',
             'tenant' => function ($query) {
                 $query
-                    ->withCount('users')
                     ->with([
                         'owner:id,name,email',
                         'stores:id,tenant_id,name,nickname,email,status,radius,latitude,longitude',
@@ -320,7 +319,6 @@ class AuthController extends Controller
             'tenants' => function ($query) {
                 $query
                     ->withPivot(['role', 'assigned_by'])
-                    ->withCount('users')
                     ->with([
                         'owner:id,name,email',
                         'stores:id,tenant_id,name,nickname,email,status,radius,latitude,longitude',
@@ -404,7 +402,7 @@ class AuthController extends Controller
             return false;
         }
 
-        DB::connection('mysql_auth')->transaction(function () use ($user, $tenant) {
+        DB::connection('mysql_ops')->transaction(function () use ($user, $tenant) {
             if ((string) $tenant->owner_id !== (string) $user->uuid) {
                 $tenant->owner_id = $user->uuid;
                 $tenant->save();
@@ -415,12 +413,20 @@ class AuthController extends Controller
                 $user->save();
             }
 
-            $tenant->users()->syncWithoutDetaching([
-                $user->uuid => [
-                    'role' => 'owner',
-                    'assigned_by' => $user->uuid,
-                ],
-            ]);
+            DB::connection('mysql_ops')
+                ->table('tenant_user')
+                ->updateOrInsert(
+                    [
+                        'tenant_id' => $tenant->id,
+                        'user_id' => $user->uuid,
+                    ],
+                    [
+                        'role' => 'owner',
+                        'assigned_by' => $user->uuid,
+                        'updated_at' => now(),
+                        'created_at' => now(),
+                    ]
+                );
         });
 
         try {

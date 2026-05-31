@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Permission;
 use App\Models\Role;
-use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -232,17 +231,10 @@ class RoleController extends Controller
                 ->where('role_id', $role->id);
 
             $assignedUsersCount = $role->tenant_id
-                ? DB::connection('mysql_auth')
-                    ->table("{$modelHasRolesTable} as model_has_roles")
-                    ->join('users', 'users.id', '=', 'model_has_roles.model_id')
-                    ->join('tenant_user', function ($join) use ($role) {
-                        $join->on('tenant_user.user_id', '=', 'users.uuid')
-                            ->where('tenant_user.tenant_id', '=', $role->tenant_id)
-                            ->where('tenant_user.role', '=', $role->name);
-                    })
-                    ->where('model_has_roles.role_id', $role->id)
-                    ->where('model_has_roles.model_type', User::class)
-                    ->where("model_has_roles.{$teamForeignKey}", $role->tenant_id)
+                ? DB::connection('mysql_ops')
+                    ->table('tenant_user')
+                    ->where('tenant_id', $role->tenant_id)
+                    ->where('role', $role->name)
                     ->count()
                 : (clone $assignmentQuery)->count();
 

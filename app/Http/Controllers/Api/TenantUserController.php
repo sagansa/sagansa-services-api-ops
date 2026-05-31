@@ -22,20 +22,28 @@ class TenantUserController extends Controller
      */
     public function index(Request $request, string $tenantId)
     {
-        $tenant = Tenant::with(['users' => function ($query) {
-            $query->withPivot(['role', 'assigned_by', 'created_at']);
-        }])->findOrFail($tenantId);
+        $tenant = Tenant::findOrFail($tenantId);
+        $memberships = DB::connection('mysql_ops')
+            ->table('tenant_user')
+            ->where('tenant_id', $tenantId)
+            ->get()
+            ->keyBy('user_id');
 
         // Get permissions and roles for each user in this tenant
-        $users = $tenant->users->map(function ($user) use ($tenantId) {
+        $users = User::query()
+            ->whereIn('uuid', $memberships->keys()->all())
+            ->get()
+            ->map(function ($user) use ($tenantId, $memberships) {
+            $membership = $memberships->get($user->uuid);
+
             return [
                 'id' => $user->uuid ?: $user->id,
                 'uuid' => $user->uuid,
                 'name' => $user->name,
                 'email' => $user->email,
-                'pivot_role' => $user->pivot->role,
-                'assigned_by' => $user->pivot->assigned_by,
-                'joined_at' => $user->pivot->created_at,
+                'pivot_role' => $membership->role ?? null,
+                'assigned_by' => $membership->assigned_by ?? null,
+                'joined_at' => $membership->created_at ?? null,
                 'roles' => $user->getRolesInTenant($tenantId)->pluck('name'),
                 'permissions' => $user->getPermissionsInTenant($tenantId)->pluck('name'),
             ];
@@ -67,12 +75,14 @@ class TenantUserController extends Controller
         $search = $request->query('search', '');
         
         // Get users matching search, excluding current tenant members and super-admins
-        $tenant = Tenant::findOrFail($tenantId);
-        $existingUserIds = $tenant->users()->pluck('users.id');
+        Tenant::findOrFail($tenantId);
+        $existingUserUuids = DB::connection('mysql_ops')
+            ->table('tenant_user')
+            ->where('tenant_id', $tenantId)
+            ->pluck('user_id');
         
         $query = User::query()
-            ->whereNotIn('id', $existingUserIds)
-            ->whereNotIn('id', $existingUserIds)
+            ->whereNotIn('uuid', $existingUserUuids)
             ->whereNotExists(function ($query) {
                 $query->select(\Illuminate\Support\Facades\DB::raw(1))
                       ->from('model_has_roles')
@@ -169,12 +179,20 @@ class TenantUserController extends Controller
                 ]);
             }
             
-            $tenant->users()->syncWithoutDetaching([
-                $user->uuid => [
+            DB::connection('mysql_ops')
+                ->table('tenant_user')
+                ->updateOrInsert(
+                    [
+                        'tenant_id' => $tenant->id,
+                        'user_id' => $user->uuid,
+                    ],
+                    [
                     'role' => $role,
                     'assigned_by' => $request->user()->uuid,
-                ],
-            ]);
+                        'updated_at' => now(),
+                        'created_at' => now(),
+                    ]
+                );
 
             try {
                 $user->assignRoleInTenant($role, $tenant->id);
@@ -264,10 +282,14 @@ class TenantUserController extends Controller
             // Assign new role
             $user->assignRoleInTenant($request->role, $tenant->id);
 
-            // Update pivot table
-            $tenant->users()->updateExistingPivot($user->uuid, [
-                'role' => $request->role,
-            ]);
+            DB::connection('mysql_ops')
+                ->table('tenant_user')
+                ->where('tenant_id', $tenant->id)
+                ->where('user_id', $user->uuid)
+                ->update([
+                    'role' => $request->role,
+                    'updated_at' => now(),
+                ]);
 
             return response()->json([
                 'message' => 'Role updated successfully',
@@ -462,7 +484,11 @@ class TenantUserController extends Controller
 
         return DB::transaction(function () use ($tenant, $user) {
             // Get user's data before removing
-            $pivotData = $tenant->users()->wherePivot('user_id', $user->uuid)->first();
+            $pivotData = DB::connection('mysql_ops')
+                ->table('tenant_user')
+                ->where('tenant_id', $tenant->id)
+                ->where('user_id', $user->uuid)
+                ->first();
             
             if (!$pivotData) {
                 return response()->json([
@@ -485,7 +511,11 @@ class TenantUserController extends Controller
             }
 
             // Remove from pivot
-            $tenant->users()->detach($user->uuid);
+            DB::connection('mysql_ops')
+                ->table('tenant_user')
+                ->where('tenant_id', $tenant->id)
+                ->where('user_id', $user->uuid)
+                ->delete();
 
             return response()->json([
                 'message' => 'User removed from tenant successfully'

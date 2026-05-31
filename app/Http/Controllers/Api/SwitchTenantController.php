@@ -72,7 +72,6 @@ class SwitchTenantController extends Controller
             'roles:id,name',
             'tenant' => function ($query) {
                 $query
-                    ->withCount('users')
                     ->with([
                         'owner:id,name,email',
                         'stores:id,tenant_id,name,nickname,email,status,radius,latitude,longitude',
@@ -82,7 +81,6 @@ class SwitchTenantController extends Controller
             'tenants' => function ($query) {
                 $query
                     ->withPivot(['role', 'assigned_by'])
-                    ->withCount('users')
                     ->with([
                         'owner:id,name,email',
                         'stores:id,tenant_id,name,nickname,email,status,radius,latitude,longitude',

@@ -36,7 +36,7 @@ class Tenant extends Model
      */
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class, $this->authTable('tenant_user'), 'tenant_id', 'user_id', 'id', 'uuid')
+        return $this->belongsToMany(User::class, $this->opsTable('tenant_user'), 'tenant_id', 'user_id', 'id', 'uuid')
             ->withPivot(['role', 'assigned_by'])
             ->withTimestamps();
     }
@@ -92,6 +92,13 @@ class Tenant extends Model
     private function authTable(string $table): string
     {
         $database = config('database.connections.mysql_auth.database');
+
+        return $database ? "{$database}.{$table}" : $table;
+    }
+
+    private function opsTable(string $table): string
+    {
+        $database = config('database.connections.mysql_ops.database');
 
         return $database ? "{$database}.{$table}" : $table;
     }
