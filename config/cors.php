@@ -12,10 +12,9 @@ $defaultDevOrigins = [
     'http://localhost:19006',   // Expo Go
     'http://127.0.0.1:19006',   // Expo Go
     'https://admin.sagansa.id', // Production Admin Web
-    'https://pos.sagansa.id',   // Production POS
+    'https://ops.sagansa.id',   // Production Ops Web
     'https://presence.sagansa.id', // Production Presence
     'https://*.sagansa.id',     // Wildcard subdomains
-    'https://bisque-bison-372440.hostingersite.com', // Hostinger (untuk testing sementara)
 ];
 
 $rawFrontendOrigins = array_filter(
