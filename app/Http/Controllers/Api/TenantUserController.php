@@ -194,6 +194,12 @@ class TenantUserController extends Controller
                     ]
                 );
 
+            if (!$user->tenant_id) {
+                $user->tenant_id = $tenant->id;
+                $user->role = $role;
+                $user->save();
+            }
+
             try {
                 $user->assignRoleInTenant($role, $tenant->id);
             } catch (\Throwable $e) {

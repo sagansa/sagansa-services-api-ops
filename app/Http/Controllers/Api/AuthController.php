@@ -399,6 +399,15 @@ class AuthController extends Controller
         }
 
         if (!$tenant) {
+            $tenant = $user->tenants()->first();
+
+            if ($tenant && (string) $user->tenant_id !== (string) $tenant->id) {
+                $user->tenant_id = $tenant->id;
+                $user->save();
+            }
+        }
+
+        if (!$tenant) {
             return false;
         }
 
