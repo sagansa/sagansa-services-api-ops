@@ -93,6 +93,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/products', [ProductController::class, 'store']);
     Route::put('/products/{product}', [ProductController::class, 'update']);
     Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+    Route::get('/product-prices', [\App\Http\Controllers\Api\ProductPriceController::class, 'index']);
+    Route::post('/product-prices', [\App\Http\Controllers\Api\ProductPriceController::class, 'store']);
+    Route::post('/product-prices/bulk', [\App\Http\Controllers\Api\ProductPriceController::class, 'bulk']);
+    Route::put('/product-prices/{productPrice}', [\App\Http\Controllers\Api\ProductPriceController::class, 'update']);
+    Route::delete('/product-prices/{productPrice}', [\App\Http\Controllers\Api\ProductPriceController::class, 'destroy']);
     
     // Orders
     Route::get('/orders', [OrderController::class, 'index']);

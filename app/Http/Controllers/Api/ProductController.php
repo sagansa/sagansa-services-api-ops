@@ -36,6 +36,7 @@ class ProductController extends Controller
                 'stores',
                 'variantGroups.variants',
                 'variantCombinations',
+                'productPrices',
                 'modifications',
             ])
             ->orderByDesc('created_at');
@@ -148,6 +149,7 @@ class ProductController extends Controller
                 'stores',
                 'variantGroups.variants',
                 'variantCombinations',
+                'productPrices',
                 'modifications',
             ])))->resolve(),
         ], 201);
@@ -168,6 +170,7 @@ class ProductController extends Controller
                 'stores',
                 'variantGroups.variants',
                 'variantCombinations',
+                'productPrices',
                 'modifications',
             ])
             ->where('id', $product)
@@ -257,6 +260,7 @@ class ProductController extends Controller
                 'stores',
                 'variantGroups.variants',
                 'variantCombinations',
+                'productPrices',
                 'modifications',
             ])))->resolve(),
         ]);

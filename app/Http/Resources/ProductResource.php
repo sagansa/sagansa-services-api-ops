@@ -136,6 +136,23 @@ class ProductResource extends JsonResource
                     })
                     ->values();
             }),
+            'product_prices' => $this->whenLoaded('productPrices', function () {
+                return $this->productPrices
+                    ->map(function ($price) {
+                        return [
+                            'id' => $price->id,
+                            'store_id' => $price->store_id,
+                            'product_id' => $price->product_id,
+                            'variant_id' => $price->variant_id,
+                            'customer_type_id' => $price->customer_type_id,
+                            'price' => (int) $price->price,
+                            'is_active' => (bool) $price->is_active,
+                            'created_at' => $price->created_at?->toISOString(),
+                            'updated_at' => $price->updated_at?->toISOString(),
+                        ];
+                    })
+                    ->values();
+            }),
             'modifications' => $this->whenLoaded('modifications', function () {
                 return $this->modifications
                     ->map(function ($modification) {
