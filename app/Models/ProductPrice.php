@@ -15,7 +15,6 @@ class ProductPrice extends Model
     protected $fillable = [
         'store_id',
         'product_id',
-        'variant_id',
         'customer_type_id',
         'price',
         'is_active',
@@ -34,11 +33,6 @@ class ProductPrice extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
-    }
-
-    public function variant(): BelongsTo
-    {
-        return $this->belongsTo(ProductVariantCombination::class, 'variant_id');
     }
 
     public function customerType(): BelongsTo

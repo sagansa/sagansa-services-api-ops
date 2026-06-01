@@ -143,7 +143,6 @@ class ProductResource extends JsonResource
                             'id' => $price->id,
                             'store_id' => $price->store_id,
                             'product_id' => $price->product_id,
-                            'variant_id' => $price->variant_id,
                             'customer_type_id' => $price->customer_type_id,
                             'price' => (int) $price->price,
                             'is_active' => (bool) $price->is_active,

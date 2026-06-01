@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\CustomerType;
 use App\Models\Product;
 use App\Models\ProductPrice;
-use App\Models\ProductVariantCombination;
 use App\Models\Store;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,7 +23,7 @@ class ProductPriceController extends Controller
 
         $query = ProductPrice::query()
             ->where('store_id', $validated['store_id'])
-            ->with(['customerType', 'variant']);
+            ->with(['customerType']);
 
         if (! empty($validated['product_id'])) {
             $query->where('product_id', $validated['product_id']);
@@ -49,7 +48,6 @@ class ProductPriceController extends Controller
             [
                 'store_id' => $validated['store_id'],
                 'product_id' => $validated['product_id'],
-                'variant_id' => $validated['variant_id'] ?? null,
                 'customer_type_id' => $validated['customer_type_id'],
             ],
             [
@@ -70,7 +68,6 @@ class ProductPriceController extends Controller
             'store_id' => ['required', 'uuid', 'exists:stores,id'],
             'product_id' => ['required', 'uuid', 'exists:products,id'],
             'prices' => ['present', 'array'],
-            'prices.*.variant_id' => ['nullable', 'uuid', 'exists:product_variant_combinations,id'],
             'prices.*.customer_type_id' => ['required', 'uuid', 'exists:customer_types,id'],
             'prices.*.price' => ['required', 'integer', 'min:0'],
             'prices.*.is_active' => ['sometimes', 'boolean'],
@@ -83,8 +80,7 @@ class ProductPriceController extends Controller
             $saved = [];
 
             foreach ($validated['prices'] as $entry) {
-                $variantId = $entry['variant_id'] ?? null;
-                $key = ($variantId ?: 'base') . ':' . $entry['customer_type_id'];
+                $key = $entry['customer_type_id'];
 
                 if (isset($seen[$key])) {
                     continue;
@@ -96,7 +92,6 @@ class ProductPriceController extends Controller
                     [
                         'store_id' => $validated['store_id'],
                         'product_id' => $validated['product_id'],
-                        'variant_id' => $variantId,
                         'customer_type_id' => $entry['customer_type_id'],
                     ],
                     [
@@ -151,7 +146,6 @@ class ProductPriceController extends Controller
         return $request->validate([
             'store_id' => ['required', 'uuid', 'exists:stores,id'],
             'product_id' => ['required', 'uuid', 'exists:products,id'],
-            'variant_id' => ['nullable', 'uuid', 'exists:product_variant_combinations,id'],
             'customer_type_id' => ['required', 'uuid', 'exists:customer_types,id'],
             'price' => ['required', 'integer', 'min:0'],
             'is_active' => ['sometimes', 'boolean'],
@@ -169,19 +163,9 @@ class ProductPriceController extends Controller
             $customerType = CustomerType::findOrFail($payload['customer_type_id']);
             abort_unless($customerType->store_id === $store->id, 422, 'Customer type does not belong to this store.');
         }
-        if (! empty($payload['variant_id'])) {
-            $variant = ProductVariantCombination::findOrFail($payload['variant_id']);
-            abort_unless($variant->product_id === $product->id, 422, 'Variant does not belong to this product.');
-        }
-
         foreach ($payload['prices'] ?? [] as $entry) {
             $type = CustomerType::findOrFail($entry['customer_type_id']);
             abort_unless($type->store_id === $store->id, 422, 'Customer type does not belong to this store.');
-
-            if (! empty($entry['variant_id'])) {
-                $variant = ProductVariantCombination::findOrFail($entry['variant_id']);
-                abort_unless($variant->product_id === $product->id, 422, 'Variant does not belong to this product.');
-            }
         }
     }
 }
