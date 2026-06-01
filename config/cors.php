@@ -14,7 +14,6 @@ $defaultDevOrigins = [
     'https://admin.sagansa.id', // Production Admin Web
     'https://ops.sagansa.id',   // Production Ops Web
     'https://presence.sagansa.id', // Production Presence
-    'https://*.sagansa.id',     // Wildcard subdomains
 ];
 
 $rawFrontendOrigins = array_filter(
@@ -22,6 +21,10 @@ $rawFrontendOrigins = array_filter(
 );
 
 $allowedOrigins = array_values(array_unique(array_merge($defaultDevOrigins, $rawFrontendOrigins)));
+
+$rawOriginPatterns = array_filter(
+    array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGIN_PATTERNS', '')))
+);
 
 return [
 
@@ -44,7 +47,9 @@ return [
 
     'allowed_origins' => $allowedOrigins,
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => array_values(array_unique(array_merge([
+        '#^https://([a-z0-9-]+\.)?sagansa\.id$#',
+    ], $rawOriginPatterns))),
 
     'allowed_headers' => ['*'],
 
