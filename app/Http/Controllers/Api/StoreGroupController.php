@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\CustomerType;
 use App\Models\PaymentMethod;
+use App\Models\ProductPrice;
 use App\Models\Store;
 use App\Models\StoreGroup;
 use Illuminate\Http\JsonResponse;
@@ -135,11 +137,24 @@ class StoreGroupController extends Controller
             ->pluck('id');
 
         DB::transaction(function () use ($sourceStore, $targetStoreIds) {
+            $sourcePaymentMethods = PaymentMethod::where('store_id', $sourceStore->id)
+                ->get();
+            $sourceCustomerTypes = CustomerType::where('store_id', $sourceStore->id)
+                ->orderBy('order')
+                ->orderBy('name')
+                ->get();
+            $sourceProductPrices = ProductPrice::where('store_id', $sourceStore->id)
+                ->get();
             $sourceProductRows = DB::connection('mysql_ops')
                 ->table('product_store')
                 ->where('store_id', $sourceStore->id)
                 ->get();
 
+            ProductPrice::whereIn('store_id', $targetStoreIds)->delete();
+            CustomerType::whereIn('store_id', $targetStoreIds)->delete();
+            PaymentMethod::whereIn('store_id', $targetStoreIds)
+                ->where('is_default', false)
+                ->delete();
             DB::connection('mysql_ops')
                 ->table('product_store')
                 ->whereIn('store_id', $targetStoreIds)
@@ -147,7 +162,63 @@ class StoreGroupController extends Controller
 
             $now = now();
             $productRows = [];
+            $paymentMethodMap = [];
+            $customerTypeMap = [];
+
             foreach ($targetStoreIds as $targetStoreId) {
+                $paymentMethodMap[$targetStoreId] = [];
+
+                foreach ($sourcePaymentMethods as $method) {
+                    if ($method->is_default) {
+                        $targetDefault = PaymentMethod::where('store_id', $targetStoreId)
+                            ->where('is_default', true)
+                            ->where('type', $method->type)
+                            ->where('name', $method->name)
+                            ->first()
+                            ?? PaymentMethod::where('store_id', $targetStoreId)
+                                ->where('is_default', true)
+                                ->where('type', $method->type)
+                                ->first();
+
+                        if ($targetDefault) {
+                            $paymentMethodMap[$targetStoreId][$method->id] = $targetDefault->id;
+                        }
+
+                        continue;
+                    }
+
+                    $newMethod = PaymentMethod::create([
+                        'store_id' => $targetStoreId,
+                        'type' => $method->type,
+                        'name' => $method->name,
+                        'is_active' => $method->is_active,
+                        'is_default' => false,
+                        'details' => $method->details,
+                        'require_proof' => $method->require_proof,
+                    ]);
+
+                    $paymentMethodMap[$targetStoreId][$method->id] = $newMethod->id;
+                }
+
+                $customerTypeMap[$targetStoreId] = [];
+
+                foreach ($sourceCustomerTypes as $customerType) {
+                    $linkedPaymentMethodId = $customerType->linked_payment_method_id
+                        ? ($paymentMethodMap[$targetStoreId][$customerType->linked_payment_method_id] ?? null)
+                        : null;
+
+                    $newCustomerType = CustomerType::create([
+                        'store_id' => $targetStoreId,
+                        'name' => $customerType->name,
+                        'is_active' => $customerType->is_active,
+                        'order' => $customerType->order,
+                        'auto_payment' => $customerType->auto_payment,
+                        'linked_payment_method_id' => $linkedPaymentMethodId,
+                    ]);
+
+                    $customerTypeMap[$targetStoreId][$customerType->id] = $newCustomerType->id;
+                }
+
                 foreach ($sourceProductRows as $row) {
                     $productRows[] = [
                         'product_id' => $row->product_id,
@@ -157,36 +228,30 @@ class StoreGroupController extends Controller
                         'updated_at' => $now,
                     ];
                 }
+
+                foreach ($sourceProductPrices as $price) {
+                    $targetCustomerTypeId = $customerTypeMap[$targetStoreId][$price->customer_type_id] ?? null;
+
+                    if (! $targetCustomerTypeId) {
+                        continue;
+                    }
+
+                    ProductPrice::create([
+                        'store_id' => $targetStoreId,
+                        'product_id' => $price->product_id,
+                        'customer_type_id' => $targetCustomerTypeId,
+                        'price' => $price->price,
+                        'is_active' => $price->is_active,
+                    ]);
+                }
             }
 
             if ($productRows !== []) {
                 DB::connection('mysql_ops')->table('product_store')->insert($productRows);
             }
-
-            $sourcePaymentMethods = PaymentMethod::where('store_id', $sourceStore->id)
-                ->where('is_default', false)
-                ->get();
-
-            PaymentMethod::whereIn('store_id', $targetStoreIds)
-                ->where('is_default', false)
-                ->delete();
-
-            foreach ($targetStoreIds as $targetStoreId) {
-                foreach ($sourcePaymentMethods as $method) {
-                    PaymentMethod::create([
-                        'store_id' => $targetStoreId,
-                        'type' => $method->type,
-                        'name' => $method->name,
-                        'is_active' => $method->is_active,
-                        'is_default' => false,
-                        'details' => $method->details,
-                        'require_proof' => $method->require_proof,
-                    ]);
-                }
-            }
         });
 
-        return response()->json(['success' => true, 'message' => 'Store group settings synced successfully']);
+        return response()->json(['success' => true, 'message' => 'Store group menu, payments, customer types, and channel pricing synced successfully']);
     }
 
     private function syncStores(StoreGroup $group, array $storeIds): void
