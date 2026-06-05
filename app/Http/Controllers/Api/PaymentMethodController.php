@@ -28,7 +28,7 @@ class PaymentMethodController extends Controller
         $store = Store::select(['id', 'tenant_id', 'store_group_id'])->find($request->store_id);
         $storeIds = [$request->store_id];
 
-        if ($store && $store->store_group_id) {
+        if ($request->input('scope') === 'group' && $store && $store->store_group_id) {
             $storeIds = Store::where('tenant_id', $store->tenant_id)
                 ->where('store_group_id', $store->store_group_id)
                 ->pluck('id')
