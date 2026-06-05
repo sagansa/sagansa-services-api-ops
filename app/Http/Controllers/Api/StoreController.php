@@ -21,7 +21,7 @@ class StoreController extends Controller
         
         // Get stores associated with active tenant
         $stores = Store::where('tenant_id', $tenantId)
-            ->select(['id', 'tenant_id', 'name', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude', 'receipt_header', 'receipt_footer', 'email_receipt_logo', 'print_receipt_logo', 'address', 'phone', 'created_at', 'updated_at'])
+            ->select(['id', 'tenant_id', 'store_group_id', 'name', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude', 'receipt_header', 'receipt_footer', 'email_receipt_logo', 'print_receipt_logo', 'address', 'phone', 'created_at', 'updated_at'])
             ->get();
 
         return response()->json([
@@ -47,7 +47,7 @@ class StoreController extends Controller
 
         // Get stores associated with the specified tenant
         $stores = Store::where('tenant_id', $tenantId)
-            ->select(['id', 'tenant_id', 'name', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude', 'receipt_header', 'receipt_footer', 'email_receipt_logo', 'print_receipt_logo', 'address', 'phone', 'created_at', 'updated_at'])
+            ->select(['id', 'tenant_id', 'store_group_id', 'name', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude', 'receipt_header', 'receipt_footer', 'email_receipt_logo', 'print_receipt_logo', 'address', 'phone', 'created_at', 'updated_at'])
             ->get();
 
         return response()->json([
@@ -65,6 +65,7 @@ class StoreController extends Controller
         
         $request->validate([
             'name' => 'required|string|max:255',
+            'store_group_id' => 'nullable|uuid|exists:store_groups,id',
             'nickname' => 'nullable|string|max:255',
             'email' => 'nullable|email|max:255',
             'status' => 'nullable|in:active,inactive', // Optional in request but will have default value
@@ -78,6 +79,7 @@ class StoreController extends Controller
 
         $store = Store::create([
             'tenant_id' => $tenantId,
+            'store_group_id' => $request->store_group_id,
             'name' => $request->name,
             'nickname' => $request->nickname,
             'email' => $request->email,
@@ -110,6 +112,7 @@ class StoreController extends Controller
 
         $request->validate([
             'name' => 'required|string|max:255',
+            'store_group_id' => 'nullable|uuid|exists:store_groups,id',
             'nickname' => 'nullable|string|max:255',
             'email' => 'nullable|email|max:255',
             'status' => 'nullable|in:active,inactive', // Optional in request but will have default value
@@ -122,6 +125,7 @@ class StoreController extends Controller
 
         $store = Store::create([
             'tenant_id' => $tenantId,
+            'store_group_id' => $request->store_group_id,
             'name' => $request->name,
             'nickname' => $request->nickname,
             'email' => $request->email,
@@ -149,7 +153,7 @@ class StoreController extends Controller
         $store = Store::where('id', $storeId)
             ->where('tenant_id', $tenantId)
             ->with('paymentMethods')
-            ->select(['id', 'name', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude', 'tax_rate', 'tax_name'])
+            ->select(['id', 'tenant_id', 'store_group_id', 'name', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude', 'tax_rate', 'tax_name'])
             ->first();
 
         if (!$store) {
@@ -187,6 +191,7 @@ class StoreController extends Controller
 
         $request->validate([
             'name' => 'sometimes|required|string|max:255',
+            'store_group_id' => 'nullable|uuid|exists:store_groups,id',
             'nickname' => 'nullable|string|max:255',
             'email' => 'nullable|email|max:255',
             'status' => 'sometimes|in:active,inactive',
@@ -209,7 +214,7 @@ class StoreController extends Controller
 
         // Handle logo uploads
         $data = $request->only([
-            'name', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude', 
+            'name', 'store_group_id', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude', 
             'tax_rate', 'tax_name', 'service_charge_rate', 'service_charge_amount',
             'receipt_header', 'receipt_footer', 'address', 'phone'
         ]);
@@ -273,9 +278,15 @@ class StoreController extends Controller
     {
         $user = $request->user();
         
-        // Check if user has access to update stores for this tenant
+        if ($user->tenant_id !== $tenantId && !$user->hasRole('super-admin')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to update stores for this tenant'
+            ], 403);
+        }
+
         $store = Store::where('id', $storeId)
-            ->where('tenant_id', $user->tenant_id)
+            ->where('tenant_id', $tenantId)
             ->first();
 
         if (!$store) {
@@ -287,6 +298,7 @@ class StoreController extends Controller
 
         $request->validate([
             'name' => 'sometimes|required|string|max:255',
+            'store_group_id' => 'nullable|uuid|exists:store_groups,id',
             'nickname' => 'nullable|string|max:255',
             'email' => 'nullable|email|max:255',
             'status' => 'sometimes|in:active,inactive',
@@ -309,7 +321,7 @@ class StoreController extends Controller
 
         // Handle logo uploads
         $data = $request->only([
-            'name', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude',
+            'name', 'store_group_id', 'nickname', 'email', 'status', 'radius', 'latitude', 'longitude',
             'tax_rate', 'tax_name', 'service_charge_rate', 'service_charge_amount',
             'receipt_header', 'receipt_footer', 'address', 'phone'
         ]);

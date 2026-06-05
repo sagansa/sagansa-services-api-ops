@@ -22,6 +22,7 @@ class Store extends Model
      */
     protected $fillable = [
         'tenant_id',
+        'store_group_id',
         'name',
         'nickname',
         'email',
@@ -62,6 +63,11 @@ class Store extends Model
     public function tenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class);
+    }
+
+    public function storeGroup(): BelongsTo
+    {
+        return $this->belongsTo(StoreGroup::class);
     }
 
     public function products(): BelongsToMany

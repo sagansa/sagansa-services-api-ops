@@ -7,6 +7,7 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
+use App\Models\Store;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -62,8 +63,9 @@ class ProductController extends Controller
         if ($request->has('store_id')) {
             $storeId = $request->input('store_id');
             \Log::info('Filtering by store_id', ['store_id' => $storeId]);
-            $query->whereHas('stores', function ($q) use ($storeId) {
-                $q->where('stores.id', $storeId);
+            $storeIds = $this->resolveMenuStoreIds($storeId);
+            $query->whereHas('stores', function ($q) use ($storeIds) {
+                $q->whereIn('stores.id', $storeIds);
             });
         }
 
@@ -511,6 +513,23 @@ class ProductController extends Controller
                 $row['id'] => ['price' => $row['price']],
             ];
         })->all());
+    }
+
+    private function resolveMenuStoreIds(string $storeId): array
+    {
+        $store = Store::select(['id', 'tenant_id', 'store_group_id'])->find($storeId);
+
+        if (! $store || ! $store->store_group_id) {
+            return [$storeId];
+        }
+
+        return Store::where('tenant_id', $store->tenant_id)
+            ->where('store_group_id', $store->store_group_id)
+            ->pluck('id')
+            ->push($storeId)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

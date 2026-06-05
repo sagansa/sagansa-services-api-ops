@@ -25,7 +25,20 @@ class PaymentMethodController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $paymentMethods = PaymentMethod::where('store_id', $request->store_id)
+        $store = Store::select(['id', 'tenant_id', 'store_group_id'])->find($request->store_id);
+        $storeIds = [$request->store_id];
+
+        if ($store && $store->store_group_id) {
+            $storeIds = Store::where('tenant_id', $store->tenant_id)
+                ->where('store_group_id', $store->store_group_id)
+                ->pluck('id')
+                ->push($request->store_id)
+                ->unique()
+                ->values()
+                ->all();
+        }
+
+        $paymentMethods = PaymentMethod::whereIn('store_id', $storeIds)
             ->orderBy('created_at', 'desc')
             ->get();
 

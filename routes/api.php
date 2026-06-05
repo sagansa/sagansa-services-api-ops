@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\StoreController;
+use App\Http\Controllers\Api\StoreGroupController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\OrderController;
@@ -71,6 +72,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/tenants/{tenantId}/stores', [StoreController::class, 'storeByTenant']);
     Route::put('/tenants/{tenantId}/stores/{storeId}', [StoreController::class, 'updateByTenant']);
     Route::delete('/tenants/{tenantId}/stores/{storeId}', [StoreController::class, 'destroyByTenant']);
+    Route::get('/tenants/{tenantId}/store-groups', [StoreGroupController::class, 'index']);
+    Route::post('/tenants/{tenantId}/store-groups', [StoreGroupController::class, 'store']);
+    Route::put('/tenants/{tenantId}/store-groups/{groupId}', [StoreGroupController::class, 'update']);
+    Route::delete('/tenants/{tenantId}/store-groups/{groupId}', [StoreGroupController::class, 'destroy']);
+    Route::post('/tenants/{tenantId}/store-groups/{groupId}/sync-settings', [StoreGroupController::class, 'syncSettings']);
     
     // Payment Methods
     Route::get('/payment-methods', [\App\Http\Controllers\Api\PaymentMethodController::class, 'index']);
