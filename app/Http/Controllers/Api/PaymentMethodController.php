@@ -7,7 +7,6 @@ use App\Services\QrisService;
 use Illuminate\Http\Request;
 
 use App\Models\PaymentMethod;
-use App\Models\Store;
 use Illuminate\Support\Facades\Validator;
 
 class PaymentMethodController extends Controller
@@ -25,22 +24,11 @@ class PaymentMethodController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $store = Store::select(['id', 'tenant_id', 'store_group_id'])->find($request->store_id);
-        $storeIds = [$request->store_id];
-
-        if ($request->input('scope') === 'group' && $store && $store->store_group_id) {
-            $storeIds = Store::where('tenant_id', $store->tenant_id)
-                ->where('store_group_id', $store->store_group_id)
-                ->pluck('id')
-                ->push($request->store_id)
-                ->unique()
-                ->values()
-                ->all();
-        }
-
-        $paymentMethods = PaymentMethod::whereIn('store_id', $storeIds)
+        $paymentMethods = PaymentMethod::where('store_id', $request->store_id)
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->unique(fn (PaymentMethod $method) => $this->paymentMethodSignature($method))
+            ->values();
 
         return response()->json(['data' => $paymentMethods]);
     }
@@ -196,6 +184,15 @@ class PaymentMethodController extends Controller
         }
 
         return $details;
+    }
+
+    private function paymentMethodSignature(PaymentMethod $method): string
+    {
+        return implode(':', [
+            $method->is_default ? 'default' : 'custom',
+            $method->type,
+            strtolower(trim($method->name)),
+        ]);
     }
 
     public function qris(Request $request, string $id, QrisService $qrisService)

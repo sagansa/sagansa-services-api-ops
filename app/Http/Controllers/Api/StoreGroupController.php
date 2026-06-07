@@ -152,9 +152,6 @@ class StoreGroupController extends Controller
 
             ProductPrice::whereIn('store_id', $targetStoreIds)->delete();
             CustomerType::whereIn('store_id', $targetStoreIds)->delete();
-            PaymentMethod::whereIn('store_id', $targetStoreIds)
-                ->where('is_default', false)
-                ->delete();
             DB::connection('mysql_ops')
                 ->table('product_store')
                 ->whereIn('store_id', $targetStoreIds)
@@ -166,39 +163,7 @@ class StoreGroupController extends Controller
             $customerTypeMap = [];
 
             foreach ($targetStoreIds as $targetStoreId) {
-                $paymentMethodMap[$targetStoreId] = [];
-
-                foreach ($sourcePaymentMethods as $method) {
-                    if ($method->is_default) {
-                        $targetDefault = PaymentMethod::where('store_id', $targetStoreId)
-                            ->where('is_default', true)
-                            ->where('type', $method->type)
-                            ->where('name', $method->name)
-                            ->first()
-                            ?? PaymentMethod::where('store_id', $targetStoreId)
-                                ->where('is_default', true)
-                                ->where('type', $method->type)
-                                ->first();
-
-                        if ($targetDefault) {
-                            $paymentMethodMap[$targetStoreId][$method->id] = $targetDefault->id;
-                        }
-
-                        continue;
-                    }
-
-                    $newMethod = PaymentMethod::create([
-                        'store_id' => $targetStoreId,
-                        'type' => $method->type,
-                        'name' => $method->name,
-                        'is_active' => $method->is_active,
-                        'is_default' => false,
-                        'details' => $method->details,
-                        'require_proof' => $method->require_proof,
-                    ]);
-
-                    $paymentMethodMap[$targetStoreId][$method->id] = $newMethod->id;
-                }
+                $paymentMethodMap[$targetStoreId] = $this->syncPaymentMethodsForStore($targetStoreId, $sourcePaymentMethods);
 
                 $customerTypeMap[$targetStoreId] = [];
 
@@ -252,6 +217,95 @@ class StoreGroupController extends Controller
         });
 
         return response()->json(['success' => true, 'message' => 'Store group menu, payments, customer types, and channel pricing synced successfully']);
+    }
+
+    private function syncPaymentMethodsForStore(string $targetStoreId, $sourcePaymentMethods): array
+    {
+        $sourceBySignature = $sourcePaymentMethods
+            ->sortByDesc(fn (PaymentMethod $method) => (bool) $method->is_default)
+            ->unique(fn (PaymentMethod $method) => $this->paymentSignature($method))
+            ->values();
+
+        $targetMethods = PaymentMethod::where('store_id', $targetStoreId)->get();
+        $targetBySignature = $targetMethods->groupBy(fn (PaymentMethod $method) => $this->paymentSignature($method));
+        $sourceSignatures = $sourceBySignature
+            ->map(fn (PaymentMethod $method) => $this->paymentSignature($method))
+            ->all();
+
+        $map = [];
+
+        foreach ($sourceBySignature as $sourceMethod) {
+            $signature = $this->paymentSignature($sourceMethod);
+            $duplicates = $targetBySignature->get($signature, collect())->sortBy('created_at')->values();
+            $targetMethod = $duplicates->first();
+
+            if (! $targetMethod && $sourceMethod->is_default) {
+                $targetMethod = $targetMethods
+                    ->where('is_default', true)
+                    ->where('type', $sourceMethod->type)
+                    ->sortBy('created_at')
+                    ->first();
+            }
+
+            if (! $targetMethod) {
+                $targetMethod = new PaymentMethod([
+                    'store_id' => $targetStoreId,
+                    'type' => $sourceMethod->type,
+                    'name' => $sourceMethod->name,
+                ]);
+            }
+
+            if (! $targetMethod) {
+                continue;
+            }
+
+            $targetMethod->fill($this->paymentPayload($sourceMethod, $targetStoreId, (bool) $targetMethod->is_default));
+            $targetMethod->save();
+
+            $map[$sourceMethod->id] = $targetMethod->id;
+
+            $duplicates
+                ->filter(fn (PaymentMethod $method) => $method->id !== $targetMethod->id)
+                ->each(fn (PaymentMethod $method) => $method->delete());
+        }
+
+        PaymentMethod::where('store_id', $targetStoreId)
+            ->where('is_default', false)
+            ->get()
+            ->reject(fn (PaymentMethod $method) => in_array($this->paymentSignature($method), $sourceSignatures, true))
+            ->each(fn (PaymentMethod $method) => $method->delete());
+
+        PaymentMethod::where('store_id', $targetStoreId)
+            ->where('is_default', true)
+            ->get()
+            ->groupBy(fn (PaymentMethod $method) => "{$method->type}:".strtolower(trim($method->name)))
+            ->each(function ($methods) {
+                $methods->sortBy('created_at')->values()->slice(1)->each(fn (PaymentMethod $method) => $method->delete());
+            });
+
+        return $map;
+    }
+
+    private function paymentPayload(PaymentMethod $sourceMethod, string $targetStoreId, bool $targetIsDefault): array
+    {
+        return [
+            'store_id' => $targetStoreId,
+            'type' => $sourceMethod->type,
+            'name' => $sourceMethod->name,
+            'is_active' => $sourceMethod->is_active,
+            'is_default' => $targetIsDefault || (bool) $sourceMethod->is_default,
+            'details' => $sourceMethod->details,
+            'require_proof' => $sourceMethod->require_proof,
+        ];
+    }
+
+    private function paymentSignature(PaymentMethod $method): string
+    {
+        return implode(':', [
+            $method->is_default ? 'default' : 'custom',
+            $method->type,
+            strtolower(trim($method->name)),
+        ]);
     }
 
     private function syncStores(StoreGroup $group, array $storeIds): void
