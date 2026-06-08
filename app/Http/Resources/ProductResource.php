@@ -22,6 +22,8 @@ class ProductResource extends JsonResource
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
+            'type' => $this->type ?: 'single',
+            'bundle_pricing_mode' => $this->bundle_pricing_mode ?: 'fixed',
             'price' => (int) $this->price,
             'category' => $this->categoryRelation?->name,
             'stock' => (int) $this->stock,
@@ -165,6 +167,43 @@ class ProductResource extends JsonResource
                         ];
                     })
                     ->values();
+            }),
+            'bundle_items' => $this->whenLoaded('bundleItems', function () {
+                return $this->bundleItems
+                    ->map(function ($item) {
+                        $component = $item->componentProduct;
+
+                        return [
+                            'id' => $item->id,
+                            'bundle_product_id' => $item->bundle_product_id,
+                            'component_product_id' => $item->component_product_id,
+                            'quantity' => (int) $item->quantity,
+                            'sort_order' => (int) $item->sort_order,
+                            'component_product' => $component ? [
+                                'id' => $component->id,
+                                'name' => $component->name,
+                                'sku' => $component->sku,
+                                'price' => (int) $component->price,
+                                'stock' => (int) $component->stock,
+                                'is_active' => (bool) $component->is_active,
+                            ] : null,
+                        ];
+                    })
+                    ->values();
+            }),
+            'bundle_available_stock' => $this->whenLoaded('bundleItems', function () {
+                if (($this->type ?: 'single') !== 'bundle' || $this->bundleItems->isEmpty()) {
+                    return null;
+                }
+
+                return $this->bundleItems
+                    ->map(function ($item) {
+                        $quantity = max(1, (int) $item->quantity);
+                        $stock = (int) ($item->componentProduct?->stock ?? 0);
+
+                        return intdiv($stock, $quantity);
+                    })
+                    ->min();
             }),
         ];
     }

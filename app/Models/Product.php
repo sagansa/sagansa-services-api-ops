@@ -27,6 +27,8 @@ class Product extends Model
         'name',
         'slug',
         'description',
+        'type',
+        'bundle_pricing_mode',
         'price',
         'image',
         'sku',
@@ -187,6 +189,16 @@ class Product extends Model
     public function productPrices(): HasMany
     {
         return $this->hasMany(ProductPrice::class);
+    }
+
+    public function bundleItems(): HasMany
+    {
+        return $this->hasMany(ProductBundleItem::class, 'bundle_product_id')->orderBy('sort_order');
+    }
+
+    public function includedInBundles(): HasMany
+    {
+        return $this->hasMany(ProductBundleItem::class, 'component_product_id');
     }
 
     public function orderItems(): HasMany

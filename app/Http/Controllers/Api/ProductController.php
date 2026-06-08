@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
 {
@@ -39,6 +40,7 @@ class ProductController extends Controller
                 'variantCombinations',
                 'productPrices',
                 'modifications',
+                'bundleItems.componentProduct',
             ])
             ->orderByDesc('created_at');
 
@@ -111,6 +113,10 @@ class ProductController extends Controller
         $data['is_active'] = $data['is_active'] ?? true;
         $data['user_id'] = $data['user_id'] ?? $user?->uuid;
         $data['tenant_id'] = $data['tenant_id'] ?? $user?->tenant_id;
+        $data['type'] = $data['type'] ?? 'single';
+        $data['bundle_pricing_mode'] = $data['type'] === 'bundle'
+            ? ($data['bundle_pricing_mode'] ?? 'fixed')
+            : 'fixed';
 
         $this->ensureOpsTenantExists($data['tenant_id'] ?? null);
         $this->ensureOpsUserExists($user);
@@ -123,17 +129,19 @@ class ProductController extends Controller
         $payloadVariantGroups = $request->input('variant_groups', []);
         $payloadVariants = $request->input('variants', []);
         $payloadModifications = $request->input('modifications', []);
+        $payloadBundleItems = $request->input('bundle_items', []);
         $storeAssignments = $request->input('stores');
         $storeIds = $storeAssignments ?? $request->input('store_ids');
 
-        unset($data['stores'], $data['store_ids'], $data['variants'], $data['variant_groups'], $data['modifications']);
+        unset($data['stores'], $data['store_ids'], $data['variants'], $data['variant_groups'], $data['modifications'], $data['bundle_items']);
 
-        $product = DB::transaction(function () use ($data, $payloadVariantGroups, $payloadVariants, $payloadModifications, $storeIds) {
+        $product = DB::transaction(function () use ($data, $payloadVariantGroups, $payloadVariants, $payloadModifications, $payloadBundleItems, $storeIds) {
             $product = Product::create($data);
 
             $this->syncVariantGroups($product, $payloadVariantGroups);
             $this->generateCombinations($product, $payloadVariants); // Generate combinations after variant groups
             $this->syncModifications($product, $payloadModifications);
+            $this->syncBundleItems($product, $payloadBundleItems);
             $this->syncStores($product, $storeIds);
 
             return $product;
@@ -153,6 +161,7 @@ class ProductController extends Controller
                 'variantCombinations',
                 'productPrices',
                 'modifications',
+                'bundleItems.componentProduct',
             ])))->resolve(),
         ], 201);
     }
@@ -174,6 +183,7 @@ class ProductController extends Controller
                 'variantCombinations',
                 'productPrices',
                 'modifications',
+                'bundleItems.componentProduct',
             ])
             ->where('id', $product)
             ->orWhere('slug', $product)
@@ -225,12 +235,19 @@ class ProductController extends Controller
         $payloadVariantGroups = $request->has('variant_groups') ? $request->input('variant_groups', []) : null;
         $payloadVariants = $request->has('variants') ? $request->input('variants', []) : null;
         $payloadModifications = $request->has('modifications') ? $request->input('modifications', []) : null;
+        $payloadBundleItems = $request->has('bundle_items') ? $request->input('bundle_items', []) : null;
         $storeAssignments = $request->has('stores') ? $request->input('stores') : null;
         $storeIds = $storeAssignments ?? ($request->has('store_ids') ? $request->input('store_ids') : null);
 
-        unset($data['stores'], $data['store_ids'], $data['variants'], $data['variant_groups'], $data['modifications']);
+        if (($data['type'] ?? $product->type ?? 'single') !== 'bundle') {
+            $data['bundle_pricing_mode'] = 'fixed';
+        } else {
+            $data['bundle_pricing_mode'] = $data['bundle_pricing_mode'] ?? $product->bundle_pricing_mode ?? 'fixed';
+        }
 
-        $product = DB::transaction(function () use ($product, $data, $payloadVariantGroups, $payloadVariants, $payloadModifications, $storeIds) {
+        unset($data['stores'], $data['store_ids'], $data['variants'], $data['variant_groups'], $data['modifications'], $data['bundle_items']);
+
+        $product = DB::transaction(function () use ($product, $data, $payloadVariantGroups, $payloadVariants, $payloadModifications, $payloadBundleItems, $storeIds) {
             $product->update($data);
 
             if ($payloadVariantGroups !== null) {
@@ -241,6 +258,10 @@ class ProductController extends Controller
 
             if ($payloadModifications !== null) {
                 $this->syncModifications($product, $payloadModifications);
+            }
+
+            if ($payloadBundleItems !== null || ($product->type ?? 'single') !== 'bundle') {
+                $this->syncBundleItems($product, $payloadBundleItems ?? []);
             }
 
             if ($storeIds !== null) {
@@ -264,6 +285,7 @@ class ProductController extends Controller
                 'variantCombinations',
                 'productPrices',
                 'modifications',
+                'bundleItems.componentProduct',
             ])))->resolve(),
         ]);
     }
@@ -283,6 +305,7 @@ class ProductController extends Controller
             'variantGroups.variants',
             'variantCombinations',
             'modifications',
+            'bundleItems.componentProduct',
         ]);
 
         $product->delete();
@@ -447,6 +470,72 @@ class ProductController extends Controller
         if ($prepared !== []) {
             $product->modifications()->createMany($prepared);
         }
+    }
+
+    private function syncBundleItems(Product $product, $bundleItems): void
+    {
+        if (is_string($bundleItems)) {
+            $decoded = json_decode($bundleItems, true);
+            $bundleItems = is_array($decoded) ? $decoded : [];
+        }
+
+        if (! is_array($bundleItems)) {
+            $bundleItems = [];
+        }
+
+        if (($product->type ?? 'single') !== 'bundle') {
+            $product->bundleItems()->delete();
+            return;
+        }
+
+        $prepared = collect($bundleItems)
+            ->filter(fn ($item) => ! empty($item['component_product_id']))
+            ->map(function ($item, int $index) {
+                return [
+                    'component_product_id' => (string) $item['component_product_id'],
+                    'quantity' => max(1, (int) ($item['quantity'] ?? 1)),
+                    'sort_order' => (int) ($item['sort_order'] ?? $index),
+                ];
+            })
+            ->filter(fn ($item) => $item['component_product_id'] !== (string) $product->id)
+            ->unique('component_product_id')
+            ->values();
+
+        if ($prepared->isEmpty()) {
+            $product->bundleItems()->delete();
+            return;
+        }
+
+        $componentIds = $prepared->pluck('component_product_id')->all();
+        $validComponentIds = Product::query()
+            ->where('tenant_id', $product->tenant_id)
+            ->whereIn('id', $componentIds)
+            ->where('id', '!=', $product->id)
+            ->where(function ($query) {
+                $query->where('type', 'single')
+                    ->orWhereNull('type');
+            })
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
+        if (count($validComponentIds) !== count($componentIds)) {
+            throw ValidationException::withMessages([
+                'bundle_items' => ['Bundle components must be single products from the same tenant.'],
+            ]);
+        }
+
+        $product->bundleItems()->delete();
+        $product->bundleItems()->createMany(
+            $prepared
+                ->map(fn ($item) => [
+                    'bundle_product_id' => $product->id,
+                    'component_product_id' => $item['component_product_id'],
+                    'quantity' => $item['quantity'],
+                    'sort_order' => $item['sort_order'],
+                ])
+                ->all()
+        );
     }
 
     private function syncStores(Product $product, $storeAssignments): void

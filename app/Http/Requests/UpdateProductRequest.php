@@ -29,6 +29,8 @@ class UpdateProductRequest extends FormRequest
         return [
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string'],
+            'type' => ['sometimes', 'string', Rule::in(['single', 'bundle'])],
+            'bundle_pricing_mode' => ['sometimes', 'string', Rule::in(['fixed', 'sum_components'])],
             'price' => ['sometimes', 'numeric', 'min:0'],
             'stock' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'sku' => [
@@ -75,6 +77,9 @@ class UpdateProductRequest extends FormRequest
             'modifications.*.name' => ['required_with:modifications', 'string', 'max:255'],
             'modifications.*.price' => ['nullable', 'numeric', 'min:0'],
             'modifications.*.is_active' => ['nullable', 'boolean'],
+            'bundle_items' => ['sometimes', 'array'],
+            'bundle_items.*.component_product_id' => ['required_with:bundle_items', 'uuid', 'exists:products,id'],
+            'bundle_items.*.quantity' => ['required_with:bundle_items', 'integer', 'min:1'],
             'stores' => ['sometimes', 'array'],
             'stores.*.id' => ['required_with:stores', 'uuid', 'exists:stores,id'],
             'stores.*.price' => ['nullable', 'numeric', 'min:0'],
@@ -91,6 +96,7 @@ class UpdateProductRequest extends FormRequest
             'variants' => $this->decodeJsonArray('variants'),
             'variant_groups' => $this->decodeJsonArray('variant_groups'),
             'modifications' => $this->decodeJsonArray('modifications'),
+            'bundle_items' => $this->decodeJsonArray('bundle_items'),
             'stores' => $this->decodeJsonArray('stores'),
         ]);
     }
