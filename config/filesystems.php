@@ -40,8 +40,8 @@ return [
 
         'public' => [
             'driver' => 'local',
-            'root' => env('SHARED_STORAGE_PATH', public_path('storage')),
-            'url' => env('SHARED_STORAGE_URL', rtrim(env('APP_URL', 'http://localhost'), '/').'/storage'),
+            'root' => env('FILESYSTEM_PUBLIC_ROOT', env('SHARED_STORAGE_PATH', storage_path('app/public'))),
+            'url' => env('FILESYSTEM_PUBLIC_URL', env('SHARED_STORAGE_URL', rtrim(env('APP_URL', 'http://localhost'), '/').'/storage')),
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

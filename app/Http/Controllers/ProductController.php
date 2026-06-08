@@ -47,7 +47,7 @@ class ProductController extends ApiController
             'is_active' => 'nullable|boolean',
             'unit_id' => 'nullable|exists:units,id',
             'category_id' => 'nullable|exists:categories,id',
-            'image' => 'nullable|image|max:2048', // Max 2MB
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
         ]);
 
         $tenantId = $this->currentTenantId();
@@ -136,7 +136,7 @@ class ProductController extends ApiController
             'is_active' => 'nullable|boolean',
             'unit_id' => 'nullable|exists:units,id',
             'category_id' => 'nullable|exists:categories,id',
-            'image' => 'nullable|image|max:2048',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
         ]);
 
         try {
