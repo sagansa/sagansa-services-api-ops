@@ -103,6 +103,9 @@ class AttendanceResource extends JsonResource
             return $path;
         }
 
-        return Storage::disk('public')->url($path);
+        // Image stored in the dedicated img service
+        $imgBaseUrl = rtrim(env('IMG_SERVICE_URL', 'https://img.sagansa.id'), '/');
+
+        return "{$imgBaseUrl}/storage/{$path}";
     }
 }

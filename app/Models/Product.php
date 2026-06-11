@@ -70,7 +70,19 @@ class Product extends Model
      */
     public function getImageUrlAttribute(): ?string
     {
-        return $this->image ? Storage::disk('public')->url($this->image) : null;
+        if (! $this->image) {
+            return null;
+        }
+
+        // Already a full URL
+        if (str_starts_with($this->image, 'http')) {
+            return $this->image;
+        }
+
+        // Image stored in the dedicated img service
+        $imgBaseUrl = rtrim(env('IMG_SERVICE_URL', 'https://img.sagansa.id'), '/');
+
+        return "{$imgBaseUrl}/storage/{$this->image}";
     }
 
     /**
