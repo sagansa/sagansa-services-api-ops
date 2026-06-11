@@ -13,6 +13,9 @@ class ImageUploadUrlController extends Controller
             return response()->json(['error' => 'Secret not configured.'], 500);
         }
 
+        // Optional directory for organized storage (e.g. "ops/product", "ops/attendance")
+        $directory = trim($request->input('directory', ''), '/');
+
         // Berlaku untuk 5 menit ke depan (300 detik)
         $expires = time() + 300;
         
@@ -23,6 +26,11 @@ class ImageUploadUrlController extends Controller
         $imgServiceUrl = rtrim(env('IMG_SERVICE_URL', 'https://img.sagansa.id'), '/') . '/api/upload';
 
         $uploadUrl = "{$imgServiceUrl}?expires={$expires}&signature={$signature}";
+
+        // Append directory if provided
+        if ($directory) {
+            $uploadUrl .= "&directory=" . urlencode($directory);
+        }
 
         return response()->json([
             'success' => true,
