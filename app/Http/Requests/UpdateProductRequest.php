@@ -52,7 +52,7 @@ class UpdateProductRequest extends FormRequest
             'category_id' => ['sometimes', 'nullable', 'uuid', 'exists:categories,id'],
             'user_id' => ['sometimes', 'nullable', 'uuid'],
             'is_active' => ['sometimes', 'boolean'],
-            'image' => ['sometimes', 'image', 'mimes:jpeg,png,jpg,gif,webp', 'max:5120'],
+            'image' => ['sometimes', 'nullable'],
             'variants' => ['sometimes', 'array'],
             'variants.*.id' => ['sometimes', 'uuid'],
             'variants.*.name' => ['required_with:variants', 'string', 'max:255'],

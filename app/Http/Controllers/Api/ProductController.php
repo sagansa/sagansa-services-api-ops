@@ -124,6 +124,8 @@ class ProductController extends Controller
         if ($request->hasFile('image')) {
             $path = $request->file('image')->store('products', 'public');
             $data['image'] = $path;
+        } elseif ($request->filled('image') && is_string($request->input('image'))) {
+            $data['image'] = $request->input('image');
         }
 
         $payloadVariantGroups = $request->input('variant_groups', []);
@@ -212,16 +214,21 @@ class ProductController extends Controller
         $data = $request->validated();
 
         if ($request->boolean('remove_image')) {
-            if ($product->image) {
+            if ($product->image && !str_starts_with($product->image, 'http')) {
                 Storage::disk('public')->delete($product->image);
             }
             $data['image'] = null;
         } elseif ($request->hasFile('image')) {
-            if ($product->image) {
+            if ($product->image && !str_starts_with($product->image, 'http')) {
                 Storage::disk('public')->delete($product->image);
             }
             $path = $request->file('image')->store('products', 'public');
             $data['image'] = $path;
+        } elseif ($request->filled('image') && is_string($request->input('image'))) {
+            if ($product->image && !str_starts_with($product->image, 'http') && $product->image !== $request->input('image')) {
+                Storage::disk('public')->delete($product->image);
+            }
+            $data['image'] = $request->input('image');
         }
 
         if (array_key_exists('request', $data)) {

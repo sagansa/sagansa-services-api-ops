@@ -45,8 +45,8 @@ class PaymentMethodController extends Controller
             'is_active' => 'boolean',
             'details' => 'nullable|array',
             'require_proof' => 'boolean',
-            'qr_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Max 2MB
-            'payment_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Generic image
+            'qr_image' => 'nullable',
+            'payment_image' => 'nullable',
             'details.qris_payload' => 'nullable|string',
         ]);
 
@@ -56,32 +56,41 @@ class PaymentMethodController extends Controller
 
         $data = $request->except(['qr_image', 'payment_image']);
         
-        // Handle QRIS image upload (Legacy support)
+        // Handle QRIS image: file upload (legacy) or string URL (direct upload)
         if ($request->hasFile('qr_image') && $request->type === 'qris') {
             $file = $request->file('qr_image');
             $filename = time() . '_' . $file->getClientOriginalName();
             $path = $file->storeAs('qris', $filename, 'public');
             
-            // Store the path in details
             $details = $data['details'] ?? [];
             if (is_string($details)) $details = json_decode($details, true);
             $details['qr_image'] = '/storage/' . $path;
             $details['qris_source'] = 'uploaded_image';
             $data['details'] = $details;
+        } elseif ($request->filled('qr_image') && is_string($request->input('qr_image'))) {
+            $details = $data['details'] ?? [];
+            if (is_string($details)) $details = json_decode($details, true);
+            $details['qr_image'] = $request->input('qr_image');
+            $details['qris_source'] = 'direct_upload';
+            $data['details'] = $details;
         }
 
         $data['details'] = $this->normaliseQrisDetails($data['details'] ?? []);
 
-        // Handle Generic Payment Image upload
+        // Handle Generic Payment Image: file upload (legacy) or string URL (direct upload)
         if ($request->hasFile('payment_image')) {
             $file = $request->file('payment_image');
             $filename = time() . '_img_' . $file->getClientOriginalName();
             $path = $file->storeAs('payment-methods', $filename, 'public');
             
-            // Store the path in details
             $details = $data['details'] ?? [];
             if (is_string($details)) $details = json_decode($details, true);
             $details['image'] = '/storage/' . $path;
+            $data['details'] = $details;
+        } elseif ($request->filled('payment_image') && is_string($request->input('payment_image'))) {
+            $details = $data['details'] ?? [];
+            if (is_string($details)) $details = json_decode($details, true);
+            $details['image'] = $request->input('payment_image');
             $data['details'] = $details;
         }
 
@@ -109,8 +118,8 @@ class PaymentMethodController extends Controller
             'is_active' => 'sometimes|boolean',
             'details' => 'nullable|array',
             'require_proof' => 'sometimes|boolean',
-            'qr_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Max 2MB
-            'payment_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Generic image
+            'qr_image' => 'nullable',
+            'payment_image' => 'nullable',
             'details.qris_payload' => 'nullable|string',
         ]);
 
@@ -120,7 +129,7 @@ class PaymentMethodController extends Controller
 
         $data = $request->except(['qr_image', 'payment_image']);
         
-        // Handle QRIS image upload
+        // Handle QRIS image: file upload (legacy) or string URL (direct upload)
         if ($request->hasFile('qr_image')) {
             // Delete old image if exists
             if ($paymentMethod->details && isset($paymentMethod->details['qr_image'])) {
@@ -132,17 +141,22 @@ class PaymentMethodController extends Controller
             $filename = time() . '_' . $file->getClientOriginalName();
             $path = $file->storeAs('qris', $filename, 'public');
             
-            // Store the path in details
             $details = $data['details'] ?? ($paymentMethod->details ?? []);
             if (is_string($details)) $details = json_decode($details, true);
             $details['qr_image'] = '/storage/' . $path;
             $details['qris_source'] = 'uploaded_image';
             $data['details'] = $details;
+        } elseif ($request->filled('qr_image') && is_string($request->input('qr_image'))) {
+            $details = $data['details'] ?? ($paymentMethod->details ?? []);
+            if (is_string($details)) $details = json_decode($details, true);
+            $details['qr_image'] = $request->input('qr_image');
+            $details['qris_source'] = 'direct_upload';
+            $data['details'] = $details;
         }
 
         $data['details'] = $this->normaliseQrisDetails($data['details'] ?? ($paymentMethod->details ?? []));
 
-        // Handle Generic Payment Image upload
+        // Handle Generic Payment Image: file upload (legacy) or string URL (direct upload)
         if ($request->hasFile('payment_image')) {
             // Delete old image if exists
             if ($paymentMethod->details && isset($paymentMethod->details['image'])) {
@@ -154,10 +168,14 @@ class PaymentMethodController extends Controller
             $filename = time() . '_img_' . $file->getClientOriginalName();
             $path = $file->storeAs('payment-methods', $filename, 'public');
             
-            // Store the path in details
             $details = $data['details'] ?? ($paymentMethod->details ?? []);
             if (is_string($details)) $details = json_decode($details, true);
             $details['image'] = '/storage/' . $path;
+            $data['details'] = $details;
+        } elseif ($request->filled('payment_image') && is_string($request->input('payment_image'))) {
+            $details = $data['details'] ?? ($paymentMethod->details ?? []);
+            if (is_string($details)) $details = json_decode($details, true);
+            $details['image'] = $request->input('payment_image');
             $data['details'] = $details;
         }
 

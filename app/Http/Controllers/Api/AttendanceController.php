@@ -281,7 +281,7 @@ class AttendanceController extends Controller
         $validated = $request->validate([
             'store_id' => 'required|uuid|exists:stores,id',
             'shift_store_id' => 'nullable|uuid|exists:shift_stores,id',
-            'photo' => 'required|image|max:5120', // 5MB max
+            'photo' => 'required', // 5MB max
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
             'accuracy' => 'nullable|numeric|min:0',
@@ -313,6 +313,8 @@ class AttendanceController extends Controller
         $photoPath = null;
         if ($request->hasFile('photo')) {
             $photoPath = $request->file('photo')->store('presence/selfies', 'public');
+        } elseif ($request->filled('photo') && is_string($request->input('photo'))) {
+            $photoPath = $request->input('photo');
         }
 
         // Create attendance record
@@ -354,7 +356,7 @@ class AttendanceController extends Controller
         $validated = $request->validate([
             'attendance_id' => 'required|uuid|exists:attendances,id',
             'store_id' => 'required|uuid|exists:stores,id',
-            'photo' => 'nullable|image|max:5120', // 5MB max
+            'photo' => 'nullable', // 5MB max
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
             'accuracy' => 'nullable|numeric|min:0',
@@ -381,6 +383,8 @@ class AttendanceController extends Controller
         $photoPath = null;
         if ($request->hasFile('photo')) {
             $photoPath = $request->file('photo')->store('presence/selfies', 'public');
+        } elseif ($request->filled('photo') && is_string($request->input('photo'))) {
+            $photoPath = $request->input('photo');
         }
 
         // Update attendance record

@@ -43,7 +43,7 @@ class StoreProductRequest extends FormRequest
             'category_id' => ['nullable', 'uuid', 'exists:categories,id'],
             'user_id' => ['nullable', 'uuid'],
             'is_active' => ['nullable', 'boolean'],
-            'image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif,webp', 'max:5120'],
+            'image' => ['nullable'],
             'variants' => ['sometimes', 'array'],
             'variants.*.name' => ['required_with:variants', 'string', 'max:255'],
             'variants.*.sku' => ['nullable', 'string', 'max:150'],

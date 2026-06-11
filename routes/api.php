@@ -57,7 +57,9 @@ Route::prefix('auth')->group(function () {
         Route::post('switch-tenant', [\App\Http\Controllers\Api\SwitchTenantController::class, 'switchTenant']);
         Route::post('email/verification-notification', [\App\Http\Controllers\Api\Auth\EmailVerificationNotificationController::class, 'store'])
             ->middleware('throttle:6,1');
-    });
+        // Generate Signed URL for image upload
+    Route::get('/upload-url', [\App\Http\Controllers\ImageUploadUrlController::class, 'getUploadUrl']);
+});
 });
 
 // Other API routes

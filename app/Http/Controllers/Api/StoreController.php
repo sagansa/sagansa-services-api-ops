@@ -206,8 +206,8 @@ class StoreController extends Controller
             'service_charge_amount' => 'nullable|numeric|min:0',
             'receipt_header' => 'nullable|string',
             'receipt_footer' => 'nullable|string',
-            'email_receipt_logo' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-            'print_receipt_logo' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'email_receipt_logo' => 'nullable',
+            'print_receipt_logo' => 'nullable',
             'address' => 'nullable|string',
             'phone' => 'nullable|string|max:20',
         ]);
@@ -222,11 +222,15 @@ class StoreController extends Controller
         if ($request->hasFile('email_receipt_logo')) {
             $path = $request->file('email_receipt_logo')->store('store-logos', 'public');
             $data['email_receipt_logo'] = $path;
+        } elseif ($request->filled('email_receipt_logo') && is_string($request->input('email_receipt_logo'))) {
+            $data['email_receipt_logo'] = $request->input('email_receipt_logo');
         }
 
         if ($request->hasFile('print_receipt_logo')) {
             $path = $request->file('print_receipt_logo')->store('store-logos', 'public');
             $data['print_receipt_logo'] = $path;
+        } elseif ($request->filled('print_receipt_logo') && is_string($request->input('print_receipt_logo'))) {
+            $data['print_receipt_logo'] = $request->input('print_receipt_logo');
         }
 
         $store->update(array_merge(
@@ -313,8 +317,8 @@ class StoreController extends Controller
             'service_charge_amount' => 'nullable|numeric|min:0',
             'receipt_header' => 'nullable|string',
             'receipt_footer' => 'nullable|string',
-            'email_receipt_logo' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-            'print_receipt_logo' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'email_receipt_logo' => 'nullable',
+            'print_receipt_logo' => 'nullable',
             'address' => 'nullable|string',
             'phone' => 'nullable|string|max:20',
         ]);
@@ -329,11 +333,15 @@ class StoreController extends Controller
         if ($request->hasFile('email_receipt_logo')) {
             $path = $request->file('email_receipt_logo')->store('store-logos', 'public');
             $data['email_receipt_logo'] = $path;
+        } elseif ($request->filled('email_receipt_logo') && is_string($request->input('email_receipt_logo'))) {
+            $data['email_receipt_logo'] = $request->input('email_receipt_logo');
         }
 
         if ($request->hasFile('print_receipt_logo')) {
             $path = $request->file('print_receipt_logo')->store('store-logos', 'public');
             $data['print_receipt_logo'] = $path;
+        } elseif ($request->filled('print_receipt_logo') && is_string($request->input('print_receipt_logo'))) {
+            $data['print_receipt_logo'] = $request->input('print_receipt_logo');
         }
 
         $store->update(array_merge(

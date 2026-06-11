@@ -108,7 +108,7 @@ class PresenceController extends Controller
         $request->validate([
             'store_id' => 'required|exists:stores,id',
             'shift_store_id' => 'required|exists:shift_stores,id',
-            'selfie_photo' => 'required|image|max:2048',
+            'selfie_photo' => 'required',
             'latitude' => 'required|numeric',
             'longitude' => 'required|numeric',
             'gps_accuracy' => 'nullable|numeric|min:0|max:100',
@@ -144,6 +144,8 @@ class PresenceController extends Controller
             $selfiePath = null;
             if ($request->hasFile('selfie_photo')) {
                 $selfiePath = $request->file('selfie_photo')->store('presence/selfies', 'public');
+            } elseif ($request->filled('selfie_photo') && is_string($request->input('selfie_photo'))) {
+                $selfiePath = $request->input('selfie_photo');
             }
 
             $attendance = Attendance::create([
@@ -196,7 +198,7 @@ class PresenceController extends Controller
         $request->validate([
             'attendance_id' => 'required|exists:attendances,id',
             'store_id' => 'required|exists:stores,id',
-            'selfie_photo' => 'required|image|max:2048',
+            'selfie_photo' => 'required',
             'latitude' => 'required|numeric',
             'longitude' => 'required|numeric',
             'gps_accuracy' => 'nullable|numeric|min:0|max:100',
@@ -243,6 +245,8 @@ class PresenceController extends Controller
             $selfiePath = null;
             if ($request->hasFile('selfie_photo')) {
                 $selfiePath = $request->file('selfie_photo')->store('presence/selfies', 'public');
+            } elseif ($request->filled('selfie_photo') && is_string($request->input('selfie_photo'))) {
+                $selfiePath = $request->input('selfie_photo');
             }
 
             $attendance->update([

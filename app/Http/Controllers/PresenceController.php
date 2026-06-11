@@ -50,7 +50,7 @@ class PresenceController extends ApiController
         $request->validate([
             'store_id' => 'required|exists:stores,id',
             'shift_store_id' => 'required|exists:shift_stores,id',
-            'image_in' => 'required|image|max:2048',
+            'image_in' => 'required',
             'check_in' => 'required|date',
             'latitude_in' => 'required|numeric',
             'longitude_in' => 'required|numeric',
@@ -74,6 +74,8 @@ class PresenceController extends ApiController
             $imagePath = null;
             if ($request->hasFile('image_in')) {
                 $imagePath = $request->file('image_in')->store('attendances', 'public');
+            } elseif ($request->filled('image_in') && is_string($request->input('image_in'))) {
+                $imagePath = $request->input('image_in');
             }
 
             $attendance = Attendance::create([
@@ -125,7 +127,7 @@ class PresenceController extends ApiController
 
         $request->validate([
             'status' => 'required|in:pending,approved,rejected',
-            'image_out' => 'nullable|image|max:2048',
+            'image_out' => 'nullable',
             'check_out' => 'nullable|date',
             'latitude_out' => 'nullable|numeric',
             'longitude_out' => 'nullable|numeric',
@@ -138,6 +140,8 @@ class PresenceController extends ApiController
             $imagePath = null;
             if ($request->hasFile('image_out')) {
                 $imagePath = $request->file('image_out')->store('attendances', 'public');
+            } elseif ($request->filled('image_out') && is_string($request->input('image_out'))) {
+                $imagePath = $request->input('image_out');
             }
 
             $updateData = $request->only(['status', 'check_out', 'latitude_out', 'longitude_out']);
