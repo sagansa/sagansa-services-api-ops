@@ -19,8 +19,8 @@ class ImageUploadUrlController extends Controller
         // Buat signature kriptografi
         $signature = hash_hmac('sha256', "expires={$expires}", $secret);
 
-        // Bentuk full URL menuju img service (Bisa ditaruh di .env nantinya)
-        $imgServiceUrl = 'https://img.sagansa.id/api/upload';
+        // Bentuk full URL menuju img service
+        $imgServiceUrl = rtrim(env('IMG_SERVICE_URL', 'https://img.sagansa.id'), '/') . '/api/upload';
 
         $uploadUrl = "{$imgServiceUrl}?expires={$expires}&signature={$signature}";
 
