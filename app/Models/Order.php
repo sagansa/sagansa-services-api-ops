@@ -16,6 +16,7 @@ class Order extends Model
     protected $fillable = [
         'tenant_id',
         'store_id',
+        'shift_session_id',
         'created_by', // user or device
         'customer_name',
         'table_code',
@@ -45,6 +46,7 @@ class Order extends Model
         'id' => 'string',
         'tenant_id' => 'string',
         'store_id' => 'string',
+        'shift_session_id' => 'string',
         'created_by' => 'string',
         'subtotal' => 'decimal:2',
         'tax_total' => 'decimal:2',

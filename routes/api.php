@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\PresenceController;
+use App\Http\Controllers\Api\PosShiftController;
 use App\Http\Controllers\Api\AttendanceController;
 use App\Http\Controllers\Api\ShiftStoreController;
 use App\Http\Controllers\Api\UserController;
@@ -112,6 +113,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/orders', [OrderController::class, 'store']);
     Route::get('/orders/{orderId}', [OrderController::class, 'show']);
     Route::put('/orders/{orderId}', [OrderController::class, 'update']);
+
+    // POS shift stock control monitoring
+    Route::get('/ops/shifts', [PosShiftController::class, 'index']);
+    Route::get('/ops/shifts/reports/stock-variance', [PosShiftController::class, 'stockVarianceReport']);
+    Route::get('/ops/shifts/{shift}', [PosShiftController::class, 'show']);
+    Route::post('/ops/shifts/{shift}/force-close', [PosShiftController::class, 'forceClose']);
     
     // Presence (Attendance)
     Route::get('/presence', [PresenceController::class, 'index']);
