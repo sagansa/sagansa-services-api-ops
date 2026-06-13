@@ -73,7 +73,10 @@ class PosShiftController extends Controller
 
             foreach ($stockItems as $item) {
                 $payload = $payloadItems->get((string) $item->product_id);
-                $expected = (int) $item->opening_stock + (int) $item->addition_stock - (int) $item->sold_quantity;
+                $expected = (int) $item->opening_stock
+                    + (int) $item->addition_stock
+                    + (int) $item->adjustment_stock
+                    - (int) $item->sold_quantity;
                 $actual = $payload ? (int) $payload['actual_closing_stock'] : max(0, $expected);
 
                 $item->expected_closing_stock = $expected;
@@ -135,6 +138,7 @@ class PosShiftController extends Controller
                 ] : null,
                 'opening_stock' => (int) $item->opening_stock,
                 'addition_stock' => (int) $item->addition_stock,
+                'adjustment_stock' => (int) $item->adjustment_stock,
                 'sold_quantity' => (int) $item->sold_quantity,
                 'expected_closing_stock' => (int) $item->expected_closing_stock,
                 'actual_closing_stock' => $item->actual_closing_stock,
@@ -184,6 +188,7 @@ class PosShiftController extends Controller
                 ] : null,
                 'opening_stock' => (int) $item->opening_stock,
                 'addition_stock' => (int) $item->addition_stock,
+                'adjustment_stock' => (int) $item->adjustment_stock,
                 'sold_quantity' => (int) $item->sold_quantity,
                 'expected_closing_stock' => (int) $item->expected_closing_stock,
                 'actual_closing_stock' => $item->actual_closing_stock,
