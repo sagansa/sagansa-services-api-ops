@@ -162,6 +162,18 @@ class ProductResource extends JsonResource
                             'name' => $modification->name,
                             'price' => $modification->price,
                             'is_active' => (bool) $modification->is_active,
+                            'linked_product_id' => $modification->linked_product_id,
+                            'linked_product_quantity' => $modification->linked_product_quantity !== null
+                                ? (int) $modification->linked_product_quantity
+                                : null,
+                            'linked_product' => $modification->linkedProduct ? [
+                                'id' => $modification->linkedProduct->id,
+                                'name' => $modification->linkedProduct->name,
+                                'sku' => $modification->linkedProduct->sku,
+                                'price' => (int) $modification->linkedProduct->price,
+                                'stock' => (int) $modification->linkedProduct->stock,
+                                'is_active' => (bool) $modification->linkedProduct->is_active,
+                            ] : null,
                             'created_at' => $modification->created_at?->toISOString(),
                             'updated_at' => $modification->updated_at?->toISOString(),
                         ];

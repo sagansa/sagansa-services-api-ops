@@ -16,6 +16,16 @@ class Store extends Model
     protected $connection = 'mysql_ops';
 
     /**
+     * Automatically append the logo URLs when serialising.
+     *
+     * @var array<int, string>
+     */
+    protected $appends = [
+        'email_receipt_logo_url',
+        'print_receipt_logo_url',
+    ];
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>
@@ -56,6 +66,46 @@ class Store extends Model
         'radius' => 'integer',
         'tax_rate' => 'float',
     ];
+
+    /**
+     * Get the email receipt logo URL.
+     */
+    public function getEmailReceiptLogoUrlAttribute(): ?string
+    {
+        if (! $this->email_receipt_logo) {
+            return null;
+        }
+
+        // Already a full URL
+        if (str_starts_with($this->email_receipt_logo, 'http')) {
+            return $this->email_receipt_logo;
+        }
+
+        // Image stored in the dedicated img service
+        $imgBaseUrl = rtrim(env('IMG_SERVICE_URL', 'https://img.sagansa.id'), '/');
+
+        return "{$imgBaseUrl}/storage/{$this->email_receipt_logo}";
+    }
+
+    /**
+     * Get the print receipt logo URL.
+     */
+    public function getPrintReceiptLogoUrlAttribute(): ?string
+    {
+        if (! $this->print_receipt_logo) {
+            return null;
+        }
+
+        // Already a full URL
+        if (str_starts_with($this->print_receipt_logo, 'http')) {
+            return $this->print_receipt_logo;
+        }
+
+        // Image stored in the dedicated img service
+        $imgBaseUrl = rtrim(env('IMG_SERVICE_URL', 'https://img.sagansa.id'), '/');
+
+        return "{$imgBaseUrl}/storage/{$this->print_receipt_logo}";
+    }
 
     /**
      * Tenant that owns the store.

@@ -77,6 +77,8 @@ class UpdateProductRequest extends FormRequest
             'modifications.*.name' => ['required_with:modifications', 'string', 'max:255'],
             'modifications.*.price' => ['nullable', 'numeric', 'min:0'],
             'modifications.*.is_active' => ['nullable', 'boolean'],
+            'modifications.*.linked_product_id' => ['nullable', 'uuid', 'exists:products,id'],
+            'modifications.*.linked_product_quantity' => ['nullable', 'integer', 'min:1'],
             'bundle_items' => ['sometimes', 'array'],
             'bundle_items.*.component_product_id' => ['required_with:bundle_items', 'uuid', 'exists:products,id'],
             'bundle_items.*.quantity' => ['required_with:bundle_items', 'integer', 'min:1'],

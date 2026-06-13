@@ -17,15 +17,23 @@ class ProductModification extends Model
         'name',
         'price',
         'is_active',
+        'linked_product_id',
+        'linked_product_quantity',
     ];
 
     protected $casts = [
         'price' => 'integer',
         'is_active' => 'boolean',
+        'linked_product_quantity' => 'integer',
     ];
 
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function linkedProduct(): BelongsTo
+    {
+        return $this->belongsTo(Product::class, 'linked_product_id');
     }
 }
