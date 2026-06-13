@@ -122,7 +122,7 @@ class Store extends Model
 
     public function products(): BelongsToMany
     {
-        return $this->belongsToMany(Product::class)->withTimestamps()->withPivot('price');
+        return $this->belongsToMany(Product::class)->withTimestamps()->withPivot('price', 'stock');
     }
 
     public function printers(): HasMany

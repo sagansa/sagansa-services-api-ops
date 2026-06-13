@@ -35,7 +35,6 @@ class ProductController extends Controller
                 'tenant',
                 'user',
                 'stores',
-                'stores',
                 'variantGroups.variants',
                 'variantCombinations',
                 'productPrices',
@@ -158,7 +157,6 @@ class ProductController extends Controller
                 'tenant',
                 'user',
                 'stores',
-                'stores',
                 'variantGroups.variants',
                 'variantCombinations',
                 'productPrices',
@@ -179,7 +177,6 @@ class ProductController extends Controller
                 'categoryRelation',
                 'tenant',
                 'user',
-                'stores',
                 'stores',
                 'variantGroups.variants',
                 'variantCombinations',
@@ -287,7 +284,6 @@ class ProductController extends Controller
                 'tenant',
                 'user',
                 'stores',
-                'stores',
                 'variantGroups.variants',
                 'variantCombinations',
                 'productPrices',
@@ -307,7 +303,6 @@ class ProductController extends Controller
             'categoryRelation',
             'tenant',
             'user',
-            'stores',
             'stores',
             'variantGroups.variants',
             'variantCombinations',
@@ -460,23 +455,34 @@ class ProductController extends Controller
 
         $product->modifications()->delete();
 
+        $schema = $product->getConnection()->getSchemaBuilder();
+        $supportsLinkedProducts = $schema->hasColumn('product_modifications', 'linked_product_id')
+            && $schema->hasColumn('product_modifications', 'linked_product_quantity');
+
         $prepared = collect($modifications)
             ->filter(fn ($modification) => ! empty($modification['name']))
-            ->map(function ($modification) use ($product) {
-                return [
+            ->map(function ($modification) use ($product, $supportsLinkedProducts) {
+                $data = [
                     'name' => $modification['name'],
                     'price' => isset($modification['price']) ? (int) $modification['price'] : 0,
                     'is_active' => array_key_exists('is_active', $modification)
                         ? (bool) $modification['is_active']
                         : true,
-                    'linked_product_id' => ! empty($modification['linked_product_id'])
-                        && (string) $modification['linked_product_id'] !== (string) $product->id
-                        ? (string) $modification['linked_product_id']
-                        : null,
-                    'linked_product_quantity' => ! empty($modification['linked_product_id'])
-                        ? max(1, (int) ($modification['linked_product_quantity'] ?? 1))
-                        : null,
                 ];
+
+                if ($supportsLinkedProducts) {
+                    $data += [
+                        'linked_product_id' => ! empty($modification['linked_product_id'])
+                            && (string) $modification['linked_product_id'] !== (string) $product->id
+                            ? (string) $modification['linked_product_id']
+                            : null,
+                        'linked_product_quantity' => ! empty($modification['linked_product_id'])
+                            ? max(1, (int) ($modification['linked_product_quantity'] ?? 1))
+                            : null,
+                    ];
+                }
+
+                return $data;
             })
             ->values()
             ->all();
@@ -488,7 +494,7 @@ class ProductController extends Controller
                 ->unique()
                 ->values();
 
-            if ($linkedProductIds->isNotEmpty()) {
+            if ($supportsLinkedProducts && $linkedProductIds->isNotEmpty()) {
                 $validLinkedProductIds = Product::query()
                     ->where('tenant_id', $product->tenant_id)
                     ->whereIn('id', $linkedProductIds->all())
@@ -606,6 +612,7 @@ class ProductController extends Controller
                     }
 
                     $price = $entry['price'] ?? null;
+                    $stock = $entry['stock'] ?? null;
                     \Log::info('Processing store entry:', ['entry' => $entry, 'price_raw' => $price]);
                     
                     // If price is null, empty string, or 0, use product default price
@@ -618,6 +625,9 @@ class ProductController extends Controller
                     return [
                         'id' => (string) $storeId,
                         'price' => $price,
+                        'stock' => ($stock === '' || $stock === null)
+                            ? null
+                            : max(0, (int) $stock),
                     ];
                 }
 
@@ -628,6 +638,7 @@ class ProductController extends Controller
                 return [
                     'id' => (string) $entry,
                     'price' => $product->price, // Use product default price
+                    'stock' => null,
                 ];
             })
             ->filter()
@@ -637,9 +648,17 @@ class ProductController extends Controller
 
         \Log::info('Final syncData:', ['syncData' => $syncData]);
 
-        $product->stores()->sync(collect($syncData)->mapWithKeys(function ($row) {
+        $supportsStoreStock = Schema::connection('mysql_ops')->hasColumn('product_store', 'stock');
+
+        $product->stores()->sync(collect($syncData)->mapWithKeys(function ($row) use ($supportsStoreStock) {
+            $pivot = ['price' => $row['price']];
+
+            if ($supportsStoreStock) {
+                $pivot['stock'] = $row['stock'];
+            }
+
             return [
-                $row['id'] => ['price' => $row['price']],
+                $row['id'] => $pivot,
             ];
         })->all());
     }

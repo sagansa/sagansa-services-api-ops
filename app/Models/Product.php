@@ -175,7 +175,7 @@ class Product extends Model
 
     public function stores(): BelongsToMany
     {
-        return $this->belongsToMany(Store::class)->withPivot('price')->withTimestamps();
+        return $this->belongsToMany(Store::class)->withPivot('price', 'stock')->withTimestamps();
     }
 
     public function variants(): HasMany

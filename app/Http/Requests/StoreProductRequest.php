@@ -74,6 +74,7 @@ class StoreProductRequest extends FormRequest
             'stores' => ['sometimes', 'array'],
             'stores.*.id' => ['required_with:stores', 'uuid', 'exists:stores,id'],
             'stores.*.price' => ['nullable', 'numeric', 'min:0'],
+            'stores.*.stock' => ['nullable', 'integer', 'min:0'],
             'store_ids' => ['sometimes', 'array'],
             'store_ids.*' => ['uuid', 'exists:stores,id'],
         ];

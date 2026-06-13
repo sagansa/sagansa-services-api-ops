@@ -65,6 +65,7 @@ class ProductResource extends JsonResource
                             'id' => $store->id,
                             'name' => $store->name,
                             'price' => $store->pivot?->price !== null ? (int) $store->pivot->price : null,
+                            'stock' => $store->pivot?->stock !== null ? (int) $store->pivot->stock : null,
                         ];
                     })
                     ->values();
