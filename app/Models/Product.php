@@ -195,7 +195,7 @@ class Product extends Model
 
     public function modifications(): HasMany
     {
-        return $this->hasMany(ProductModification::class);
+        return $this->hasMany(ProductModification::class)->orderBy('sort_order');
     }
 
     public function productPrices(): HasMany

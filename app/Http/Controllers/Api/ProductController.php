@@ -417,7 +417,7 @@ class ProductController extends Controller
             if (!empty($groupData['variants']) && is_array($groupData['variants'])) {
                 $variants = collect($groupData['variants'])
                     ->filter(fn ($v) => !empty($v['name']))
-                    ->map(function ($v) use ($product) {
+                    ->map(function ($v, $variantIndex) use ($product) {
                         return [
                             'product_id' => $product->id,
                             'name' => $v['name'],
@@ -425,9 +425,11 @@ class ProductController extends Controller
                             'price' => isset($v['price']) ? (int) $v['price'] : null,
                             'stock' => isset($v['stock']) ? (int) $v['stock'] : 0,
                             'is_active' => array_key_exists('is_active', $v) ? (bool) $v['is_active'] : true,
+                            'sort_order' => array_key_exists('sort_order', $v) ? (int) $v['sort_order'] : (int) $variantIndex,
                             'available_with_variants' => $v['available_with_variants'] ?? null,
                         ];
                     })
+                    ->values()
                     ->all();
 
                 if (!empty($variants)) {
@@ -461,13 +463,16 @@ class ProductController extends Controller
 
         $prepared = collect($modifications)
             ->filter(fn ($modification) => ! empty($modification['name']))
-            ->map(function ($modification) use ($product, $supportsLinkedProducts) {
+            ->map(function ($modification, $index) use ($product, $supportsLinkedProducts) {
                 $data = [
                     'name' => $modification['name'],
                     'price' => isset($modification['price']) ? (int) $modification['price'] : 0,
                     'is_active' => array_key_exists('is_active', $modification)
                         ? (bool) $modification['is_active']
                         : true,
+                    'sort_order' => array_key_exists('sort_order', $modification)
+                        ? (int) $modification['sort_order']
+                        : (int) $index,
                 ];
 
                 if ($supportsLinkedProducts) {

@@ -19,12 +19,14 @@ class ProductModification extends Model
         'is_active',
         'linked_product_id',
         'linked_product_quantity',
+        'sort_order',
     ];
 
     protected $casts = [
         'price' => 'integer',
         'is_active' => 'boolean',
         'linked_product_quantity' => 'integer',
+        'sort_order' => 'integer',
     ];
 
     public function product(): BelongsTo

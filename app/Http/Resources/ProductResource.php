@@ -115,6 +115,7 @@ class ProductResource extends JsonResource
                             'additional_price' => $variant->price,
                             'stock' => $variant->stock,
                             'is_active' => (bool) $variant->is_active,
+                            'sort_order' => (int) ($variant->sort_order ?? 0),
                             'product_variant_group_id' => $variant->product_variant_group_id,
                             'available_with_variants' => $variant->available_with_variants,
                         ];
@@ -165,6 +166,7 @@ class ProductResource extends JsonResource
                             'name' => $modification->name,
                             'price' => $modification->price,
                             'is_active' => (bool) $modification->is_active,
+                            'sort_order' => (int) ($modification->sort_order ?? 0),
                             'linked_product_id' => $modification->linked_product_id,
                             'linked_product_quantity' => $modification->linked_product_quantity !== null
                                 ? (int) $modification->linked_product_quantity

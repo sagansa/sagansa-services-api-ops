@@ -21,6 +21,7 @@ class ProductVariant extends Model
         'price',
         'stock',
         'is_active',
+        'sort_order',
         'available_with_variants',
     ];
 
@@ -28,6 +29,7 @@ class ProductVariant extends Model
         'price' => 'integer',
         'stock' => 'integer',
         'is_active' => 'boolean',
+        'sort_order' => 'integer',
         'available_with_variants' => 'array',
     ];
 

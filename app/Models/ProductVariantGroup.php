@@ -29,6 +29,6 @@ class ProductVariantGroup extends Model
 
     public function variants()
     {
-        return $this->hasMany(ProductVariant::class);
+        return $this->hasMany(ProductVariant::class)->orderBy('sort_order');
     }
 }
