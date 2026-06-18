@@ -243,21 +243,31 @@ class OrderController extends Controller
             ? Carbon::parse($request->get('end_date'), $timezone)->endOfDay()
             : (clone $today)->endOfDay();
 
-        // Base query scoped to tenant + date range
-        $baseQuery = Order::where('tenant_id', $user->tenant_id)
+        // Use DB facade with explicit connection for reliability
+        $conn = DB::connection('mysql_ops');
+
+        // Base WHERE conditions
+        $baseWhere = [
+            ['tenant_id', $user->tenant_id],
+        ];
+
+        $storeId = $request->filled('store_id') ? $request->get('store_id') : null;
+        $source = $request->filled('source') ? $request->get('source') : null;
+
+        // --- Totals (completed orders only for revenue) ---
+        $totalsQuery = $conn->table('orders')
+            ->where($baseWhere)
+            ->where('status', 'completed')
             ->whereBetween('created_at', [$startDate, $endDate]);
 
-        if ($request->filled('store_id')) {
-            $baseQuery->where('store_id', $request->get('store_id'));
+        if ($storeId) {
+            $totalsQuery->where('store_id', $storeId);
         }
-        if ($request->filled('source')) {
-            $baseQuery->where('source', $request->get('source'));
+        if ($source) {
+            $totalsQuery->where('source', $source);
         }
 
-        // Clone for revenue (only completed orders contribute to revenue)
-        $revenueQuery = (clone $baseQuery)->where('status', 'completed');
-
-        $totals = (clone $revenueQuery)
+        $totalsRow = (clone $totalsQuery)
             ->selectRaw("
                 COUNT(*) as total_orders,
                 COALESCE(SUM(subtotal), 0) as total_subtotal,
@@ -268,27 +278,38 @@ class OrderController extends Controller
             ")
             ->first();
 
-        $averageOrderValue = $totals && $totals->total_orders > 0
-            ? round($totals->total_revenue / $totals->total_orders, 2)
-            : 0;
+        $totalOrders = (int) ($totalsRow->total_orders ?? 0);
+        $totalRevenue = (float) ($totalsRow->total_revenue ?? 0);
+        $averageOrderValue = $totalOrders > 0 ? round($totalRevenue / $totalOrders, 2) : 0;
 
-        // Breakdown by status (all orders in range, not just completed)
-        $byStatus = (clone $baseQuery)
+        // --- By Status (all orders, not just completed) ---
+        $byStatusQuery = $conn->table('orders')
+            ->where($baseWhere)
+            ->whereBetween('created_at', [$startDate, $endDate]);
+        if ($storeId) $byStatusQuery->where('store_id', $storeId);
+        if ($source) $byStatusQuery->where('source', $source);
+
+        $byStatusRows = (clone $byStatusQuery)
             ->selectRaw("status, COUNT(*) as count, COALESCE(SUM(grand_total), 0) as total")
             ->groupBy('status')
-            ->get()
-            ->keyBy('status');
+            ->get();
 
-        // Breakdown by source
-        $bySource = (clone $baseQuery)
+        // --- By Source ---
+        $bySourceRows = (clone $byStatusQuery)
             ->selectRaw("source, COUNT(*) as count, COALESCE(SUM(grand_total), 0) as total")
             ->groupBy('source')
-            ->get()
-            ->keyBy('source');
+            ->get();
 
-        // Revenue by store
-        $byStore = (clone $revenueQuery)
+        // --- By Store ---
+        $byStoreQuery = $conn->table('orders')
             ->join('stores', 'stores.id', '=', 'orders.store_id')
+            ->where('orders.tenant_id', $user->tenant_id)
+            ->where('orders.status', 'completed')
+            ->whereBetween('orders.created_at', [$startDate, $endDate]);
+        if ($storeId) $byStoreQuery->where('orders.store_id', $storeId);
+        if ($source) $byStoreQuery->where('orders.source', $source);
+
+        $byStoreRows = $byStoreQuery
             ->selectRaw("
                 orders.store_id,
                 stores.name as store_name,
@@ -300,15 +321,17 @@ class OrderController extends Controller
             ->orderByDesc('total')
             ->get();
 
-        // Top products by quantity (completed orders only)
-        $topProducts = OrderItem::query()
+        // --- Top Products ---
+        $topProductsQuery = $conn->table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
             ->join('products', 'products.id', '=', 'order_items.product_id')
             ->where('orders.tenant_id', $user->tenant_id)
             ->where('orders.status', 'completed')
-            ->whereBetween('orders.created_at', [$startDate, $endDate])
-            ->when($request->filled('store_id'), fn($q) => $q->where('orders.store_id', $request->get('store_id')))
-            ->when($request->filled('source'), fn($q) => $q->where('orders.source', $request->get('source')))
+            ->whereBetween('orders.created_at', [$startDate, $endDate]);
+        if ($storeId) $topProductsQuery->where('orders.store_id', $storeId);
+        if ($source) $topProductsQuery->where('orders.source', $source);
+
+        $topProductsRows = $topProductsQuery
             ->selectRaw("
                 order_items.product_id,
                 products.name as product_name,
@@ -320,24 +343,36 @@ class OrderController extends Controller
             ->limit(10)
             ->get();
 
-        // Breakdown by payment type (completed orders)
-        $paymentTypeTable = (new PaymentType())->getTable();
-        $byPaymentType = (clone $revenueQuery)
-            ->leftJoin('order_payments', function ($join) {
-                $join->on('order_payments.order_id', '=', 'orders.id')
-                    ->whereNull('order_payments.deleted_at');
-            })
-            ->leftJoin($paymentTypeTable . ' as pt', 'pt.id', '=', 'order_payments.payment_type_id')
-            ->whereNotNull('order_payments.payment_type_id')
-            ->selectRaw("
-                order_payments.payment_type_id,
-                pt.name as payment_type_name,
-                COUNT(DISTINCT orders.id) as order_count,
-                COALESCE(SUM(order_payments.amount), 0) as total_amount
-            ")
-            ->groupBy('order_payments.payment_type_id', 'pt.name')
-            ->orderByDesc('total_amount')
-            ->get();
+        // --- By Payment Type (with safe fallback) ---
+        $byPaymentTypeRows = collect();
+        try {
+            $byPaymentTypeQuery = $conn->table('orders')
+                ->leftJoin('order_payments', function ($join) {
+                    $join->on('order_payments.order_id', '=', 'orders.id')
+                        ->whereNull('order_payments.deleted_at');
+                })
+                ->leftJoin('payment_type as pt', 'pt.id', '=', 'order_payments.payment_type_id')
+                ->where('orders.tenant_id', $user->tenant_id)
+                ->where('orders.status', 'completed')
+                ->whereBetween('orders.created_at', [$startDate, $endDate])
+                ->whereNotNull('order_payments.payment_type_id');
+            if ($storeId) $byPaymentTypeQuery->where('orders.store_id', $storeId);
+            if ($source) $byPaymentTypeQuery->where('orders.source', $source);
+
+            $byPaymentTypeRows = $byPaymentTypeQuery
+                ->selectRaw("
+                    order_payments.payment_type_id,
+                    pt.name as payment_type_name,
+                    COUNT(DISTINCT orders.id) as order_count,
+                    COALESCE(SUM(order_payments.amount), 0) as total_amount
+                ")
+                ->groupBy('order_payments.payment_type_id', 'pt.name')
+                ->orderByDesc('total_amount')
+                ->get();
+        } catch (\Exception $e) {
+            // If order_payments or payment_type table doesn't exist, return empty
+            $byPaymentTypeRows = collect();
+        }
 
         return response()->json([
             'success' => true,
@@ -348,42 +383,42 @@ class OrderController extends Controller
                     'timezone' => $timezone,
                 ],
                 'filters' => [
-                    'store_id' => $request->get('store_id'),
-                    'source' => $request->get('source'),
+                    'store_id' => $storeId,
+                    'source' => $source,
                 ],
                 'totals' => [
-                    'total_orders' => (int) ($totals->total_orders ?? 0),
-                    'total_subtotal' => (float) ($totals->total_subtotal ?? 0),
-                    'total_discount' => (float) ($totals->total_discount ?? 0),
-                    'total_tax' => (float) ($totals->total_tax ?? 0),
-                    'total_service' => (float) ($totals->total_service ?? 0),
-                    'total_revenue' => (float) ($totals->total_revenue ?? 0),
+                    'total_orders' => $totalOrders,
+                    'total_subtotal' => (float) ($totalsRow->total_subtotal ?? 0),
+                    'total_discount' => (float) ($totalsRow->total_discount ?? 0),
+                    'total_tax' => (float) ($totalsRow->total_tax ?? 0),
+                    'total_service' => (float) ($totalsRow->total_service ?? 0),
+                    'total_revenue' => $totalRevenue,
                     'average_order_value' => (float) $averageOrderValue,
                 ],
-                'by_status' => $byStatus->map(fn($row) => [
+                'by_status' => $byStatusRows->map(fn($row) => [
                     'status' => $row->status,
                     'count' => (int) $row->count,
                     'total' => (float) $row->total,
                 ])->values(),
-                'by_source' => $bySource->map(fn($row) => [
+                'by_source' => $bySourceRows->map(fn($row) => [
                     'source' => $row->source,
                     'count' => (int) $row->count,
                     'total' => (float) $row->total,
                 ])->values(),
-                'by_store' => $byStore->map(fn($row) => [
+                'by_store' => $byStoreRows->map(fn($row) => [
                     'store_id' => $row->store_id,
                     'store_name' => $row->store_name,
                     'store_nickname' => $row->store_nickname,
                     'count' => (int) $row->count,
                     'total' => (float) $row->total,
                 ])->values(),
-                'top_products' => $topProducts->map(fn($row) => [
+                'top_products' => $topProductsRows->map(fn($row) => [
                     'product_id' => $row->product_id,
                     'product_name' => $row->product_name,
                     'total_quantity' => (int) $row->total_quantity,
                     'total_revenue' => (float) $row->total_revenue,
                 ])->values(),
-                'by_payment_type' => $byPaymentType->map(fn($row) => [
+                'by_payment_type' => $byPaymentTypeRows->map(fn($row) => [
                     'payment_type_id' => $row->payment_type_id,
                     'payment_type_name' => $row->payment_type_name ?? 'Unknown',
                     'order_count' => (int) $row->order_count,
