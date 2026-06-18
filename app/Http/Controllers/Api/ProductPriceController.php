@@ -16,14 +16,16 @@ class ProductPriceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'store_id' => ['required', 'uuid', 'exists:stores,id'],
+            'store_id' => ['nullable', 'uuid', 'exists:stores,id'],
             'product_id' => ['nullable', 'uuid', 'exists:products,id'],
             'customer_type_id' => ['nullable', 'uuid', 'exists:customer_types,id'],
         ]);
 
-        $query = ProductPrice::query()
-            ->where('store_id', $validated['store_id'])
-            ->with(['customerType']);
+        $query = ProductPrice::query()->with(['customerType']);
+
+        if (! empty($validated['store_id'])) {
+            $query->where('store_id', $validated['store_id']);
+        }
 
         if (! empty($validated['product_id'])) {
             $query->where('product_id', $validated['product_id']);

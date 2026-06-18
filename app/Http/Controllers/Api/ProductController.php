@@ -728,7 +728,7 @@ class ProductController extends Controller
             $name = $orderedVariants->pluck('name')->join(' × ');
             \Log::info("Generated combination name: '$name'");
             
-            $price = $product->price;
+            $price = (int) $product->price + $orderedVariants->sum(fn ($variant) => (int) ($variant?->price ?? 0));
             $stock = 0;
             $sku = null;
             $isActive = true;

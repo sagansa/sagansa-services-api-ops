@@ -108,14 +108,16 @@ class ProductResource extends JsonResource
                             'variants' => $group->variants->map(function ($variant) {
                                 return [
                                     'id' => $variant->id,
-                                    'name' => $variant->name,
-                                    'sku' => $variant->sku,
-                                    'price' => $variant->price,
-                                    'stock' => $variant->stock,
-                                    'is_active' => (bool) $variant->is_active,
-                                    'product_variant_group_id' => $variant->product_variant_group_id,
-                                    'available_with_variants' => $variant->available_with_variants,
-                                ];
+                            'name' => $variant->name,
+                            'sku' => $variant->sku,
+                            'price' => $variant->price,
+                            'price_adjustment' => $variant->price,
+                            'additional_price' => $variant->price,
+                            'stock' => $variant->stock,
+                            'is_active' => (bool) $variant->is_active,
+                            'product_variant_group_id' => $variant->product_variant_group_id,
+                            'available_with_variants' => $variant->available_with_variants,
+                        ];
                             }),
                         ];
                     })
