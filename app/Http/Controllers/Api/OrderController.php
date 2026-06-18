@@ -350,34 +350,42 @@ class OrderController extends Controller
             ->limit(10)
             ->get();
 
-        // --- By Payment Type (with safe fallback) ---
+        // --- By Payment Method ---
+        // POS orders store payment info in orders.payment_method (string) and
+        // orders.payment_snapshot (JSON). We group by payment_method directly
+        // since payment_type_id is typically null for POS transactions.
         $byPaymentTypeRows = collect();
         try {
-            $byPaymentTypeQuery = $conn->table('orders')
-                ->leftJoin('order_payments', function ($join) {
-                    $join->on('order_payments.order_id', '=', 'orders.id')
-                        ->whereNull('order_payments.deleted_at');
-                })
-                ->leftJoin('payment_type as pt', 'pt.id', '=', 'order_payments.payment_type_id')
-                ->where('orders.tenant_id', $user->tenant_id)
-                ->where('orders.status', 'completed')
-                ->whereBetween('orders.created_at', [$startDate, $endDate])
-                ->whereNotNull('order_payments.payment_type_id');
-            if ($storeId) $byPaymentTypeQuery->where('orders.store_id', $storeId);
-            if ($source) $byPaymentTypeQuery->where('orders.source', $source);
+            $hasPaymentMethodColumn = $conn->getSchemaBuilder()->hasColumn('orders', 'payment_method');
 
-            $byPaymentTypeRows = $byPaymentTypeQuery
-                ->selectRaw("
-                    order_payments.payment_type_id,
-                    pt.name as payment_type_name,
-                    COUNT(DISTINCT orders.id) as order_count,
-                    COALESCE(SUM(order_payments.amount), 0) as total_amount
-                ")
-                ->groupBy('order_payments.payment_type_id', 'pt.name')
-                ->orderByDesc('total_amount')
-                ->get();
+            if ($hasPaymentMethodColumn) {
+                $byPaymentMethodQuery = $conn->table('orders')
+                    ->where('tenant_id', $user->tenant_id)
+                    ->where('status', 'completed')
+                    ->whereBetween('created_at', [$startDate, $endDate])
+                    ->whereNotNull('payment_method')
+                    ->where('payment_method', '!=', '');
+                if ($storeId) $byPaymentMethodQuery->where('store_id', $storeId);
+                if ($source) $byPaymentMethodQuery->where('source', $source);
+
+                $byPaymentTypeRows = $byPaymentMethodQuery
+                    ->selectRaw("
+                        payment_method as payment_type_name,
+                        COUNT(*) as order_count,
+                        COALESCE(SUM(grand_total), 0) as total_amount
+                    ")
+                    ->groupBy('payment_method')
+                    ->orderByDesc('total_amount')
+                    ->get()
+                    ->map(fn($row) => (object) [
+                        'payment_type_id' => null,
+                        'payment_type_name' => $row->payment_type_name ?? 'Unknown',
+                        'order_count' => $row->order_count,
+                        'total_amount' => $row->total_amount,
+                    ]);
+            }
         } catch (\Exception $e) {
-            // If order_payments or payment_type table doesn't exist, return empty
+            // If payment_method column doesn't exist or query fails, return empty
             $byPaymentTypeRows = collect();
         }
 
