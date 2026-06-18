@@ -223,6 +223,18 @@ class OrderController extends Controller
      * Get sales data for bar charts: gross sales, refunds, discounts,
      * net sales, and gross profit, with grouping by day/hour/week/month.
      *
+     * Definitions:
+     *  - Gross Sales   = SUM(subtotal) dari order completed
+     *                    (total harga sebelum discount/refund/tax/service)
+     *  - Refunds       = SUM(total_refunded) dari order yang punya refund
+     *                    (order tetap completed, refund dicatat di kolom
+     *                    total_refunded / order_items.refund_amount)
+     *  - Discounts     = SUM(discount_total) dari order completed
+     *  - Net Sales     = Gross Sales − Refunds − Discounts
+     *                    (pendapatan bersih setelah potongan)
+     *  - Gross Profit  = Net Sales − COGS
+     *                    (COGS = quantity × products.cost)
+     *
      * Supported query params:
      *  - start_date (Y-m-d)  default: today
      *  - end_date   (Y-m-d)  default: today
@@ -260,7 +272,6 @@ class OrderController extends Controller
 
         $conn = DB::connection('mysql_ops');
 
-        // Build base query (completed + refunded + cancelled for refunds)
         $baseWhere = [
             ['orders.tenant_id', $user->tenant_id],
         ];
@@ -273,7 +284,19 @@ class OrderController extends Controller
             default => "DATE(orders.created_at)",
         };
 
-        // --- Completed orders: gross sales, discounts, net sales ---
+        // Check which optional columns exist
+        $hasTotalRefunded = false;
+        $hasCostColumn = false;
+        try {
+            $hasTotalRefunded = $conn->getSchemaBuilder()->hasColumn('orders', 'total_refunded');
+        } catch (\Exception $e) {
+        }
+        try {
+            $hasCostColumn = $conn->getSchemaBuilder()->hasColumn('products', 'cost');
+        } catch (\Exception $e) {
+        }
+
+        // --- Completed orders: gross sales, discounts, refunds, taxes ---
         $completedQuery = $conn->table('orders')
             ->where($baseWhere)
             ->where('orders.status', 'completed')
@@ -286,14 +309,18 @@ class OrderController extends Controller
         if ($source) $completedQuery->where('orders.source', $source);
         if ($createdBy) $completedQuery->where('orders.created_by', $createdBy);
 
+        $refundedExpr = $hasTotalRefunded
+            ? "COALESCE(SUM(orders.total_refunded), 0)"
+            : "0";
+
         $completedRows = $completedQuery
             ->selectRaw("
                 {$dateExpr} as period_key,
                 COALESCE(SUM(orders.subtotal), 0) as gross_sales,
                 COALESCE(SUM(orders.discount_total), 0) as discounts,
+                {$refundedExpr} as refunds,
                 COALESCE(SUM(orders.tax_total), 0) as taxes,
                 COALESCE(SUM(orders.service_total), 0) as services,
-                COALESCE(SUM(orders.grand_total), 0) as net_sales,
                 COUNT(*) as order_count
             ")
             ->groupBy('period_key')
@@ -301,38 +328,7 @@ class OrderController extends Controller
             ->get()
             ->keyBy('period_key');
 
-        // --- Refunded orders: refunds ---
-        $refundedQuery = $conn->table('orders')
-            ->where($baseWhere)
-            ->where('orders.status', 'refunded')
-            ->whereBetween('orders.created_at', [$startDate, $endDate]);
-
-        if ($startHour !== null && $endHour !== null) {
-            $refundedQuery->whereRaw('HOUR(orders.created_at) BETWEEN ? AND ?', [$startHour, $endHour]);
-        }
-        if ($storeId) $refundedQuery->where('orders.store_id', $storeId);
-        if ($source) $refundedQuery->where('orders.source', $source);
-        if ($createdBy) $refundedQuery->where('orders.created_by', $createdBy);
-
-        $refundedRows = $refundedQuery
-            ->selectRaw("
-                {$dateExpr} as period_key,
-                COALESCE(SUM(orders.grand_total), 0) as refunds
-            ")
-            ->groupBy('period_key')
-            ->orderBy('period_key')
-            ->get()
-            ->keyBy('period_key');
-
-        // --- Gross profit (COGS) via order_items joined with products ---
-        // cost is stored on products table; order_items stores product_snapshot JSON
-        $hasCostColumn = false;
-        try {
-            $hasCostColumn = $conn->getSchemaBuilder()->hasColumn('products', 'cost');
-        } catch (\Exception $e) {
-            $hasCostColumn = false;
-        }
-
+        // --- COGS via order_items joined with products ---
         $costRows = collect();
         if ($hasCostColumn) {
             $costQuery = $conn->table('order_items')
@@ -363,22 +359,24 @@ class OrderController extends Controller
 
         // Merge all rows by period_key
         $allKeys = $completedRows->keys()
-            ->merge($refundedRows->keys())
             ->merge($costRows->keys())
             ->unique()
             ->sort()
             ->values();
 
-        $series = $allKeys->map(function ($key) use ($completedRows, $refundedRows, $costRows) {
+        $series = $allKeys->map(function ($key) use ($completedRows, $costRows) {
             $completed = $completedRows->get($key);
-            $refunded = $refundedRows->get($key);
             $cost = $costRows->get($key);
 
             $grossSales = (float) ($completed->gross_sales ?? 0);
             $discounts = (float) ($completed->discounts ?? 0);
-            $netSales = (float) ($completed->net_sales ?? 0);
-            $refunds = (float) ($refunded->refunds ?? 0);
+            $refunds = (float) ($completed->refunds ?? 0);
             $cogs = (float) ($cost->cogs ?? 0);
+
+            // Net Sales = Gross Sales − Refunds − Discounts
+            $netSales = $grossSales - $refunds - $discounts;
+
+            // Gross Profit = Net Sales − COGS
             $grossProfit = $netSales - $cogs;
 
             return [
@@ -419,6 +417,13 @@ class OrderController extends Controller
                     'start_hour' => $startHour,
                     'end_hour' => $endHour,
                     'group_by' => $groupBy,
+                ],
+                'definitions' => [
+                    'gross_sales' => 'SUM(subtotal) dari order completed — total harga sebelum discount/refund',
+                    'refunds' => 'SUM(total_refunded) dari order yang memiliki refund',
+                    'discounts' => 'SUM(discount_total) dari order completed',
+                    'net_sales' => 'Gross Sales − Refunds − Discounts',
+                    'gross_profit' => 'Net Sales − COGS (quantity × products.cost)',
                 ],
                 'totals' => $totals,
                 'series' => $series,
