@@ -220,6 +220,213 @@ class OrderController extends Controller
     }
 
     /**
+     * Get sales data for bar charts: gross sales, refunds, discounts,
+     * net sales, and gross profit, with grouping by day/hour/week/month.
+     *
+     * Supported query params:
+     *  - start_date (Y-m-d)  default: today
+     *  - end_date   (Y-m-d)  default: today
+     *  - start_hour (0-23)   optional
+     *  - end_hour   (0-23)   optional
+     *  - store_id   uuid     optional
+     *  - created_by string   optional (employee/device identifier)
+     *  - source     string   optional (pos|web-order)
+     *  - group_by   string   optional (day|hour|week|month) default: day
+     */
+    public function chart(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $timezone = config('app.timezone', 'Asia/Jakarta');
+        $today = Carbon::today($timezone);
+
+        $startDate = $request->get('start_date')
+            ? Carbon::parse($request->get('start_date'), $timezone)->startOfDay()
+            : (clone $today)->startOfDay();
+        $endDate = $request->get('end_date')
+            ? Carbon::parse($request->get('end_date'), $timezone)->endOfDay()
+            : (clone $today)->endOfDay();
+
+        $startHour = $request->filled('start_hour') ? (int) $request->get('start_hour') : null;
+        $endHour = $request->filled('end_hour') ? (int) $request->get('end_hour') : null;
+
+        $storeId = $request->filled('store_id') ? $request->get('store_id') : null;
+        $source = $request->filled('source') ? $request->get('source') : null;
+        $createdBy = $request->filled('created_by') ? $request->get('created_by') : null;
+
+        $groupBy = in_array($request->get('group_by'), ['hour', 'day', 'week', 'month'], true)
+            ? $request->get('group_by')
+            : 'day';
+
+        $conn = DB::connection('mysql_ops');
+
+        // Build base query (completed + refunded + cancelled for refunds)
+        $baseWhere = [
+            ['orders.tenant_id', $user->tenant_id],
+        ];
+
+        // Determine date grouping expression
+        $dateExpr = match ($groupBy) {
+            'hour' => "DATE_FORMAT(orders.created_at, '%Y-%m-%d %H:00')",
+            'week' => "DATE_FORMAT(orders.created_at, '%x-W%v')",
+            'month' => "DATE_FORMAT(orders.created_at, '%Y-%m')",
+            default => "DATE(orders.created_at)",
+        };
+
+        // --- Completed orders: gross sales, discounts, net sales ---
+        $completedQuery = $conn->table('orders')
+            ->where($baseWhere)
+            ->where('orders.status', 'completed')
+            ->whereBetween('orders.created_at', [$startDate, $endDate]);
+
+        if ($startHour !== null && $endHour !== null) {
+            $completedQuery->whereRaw('HOUR(orders.created_at) BETWEEN ? AND ?', [$startHour, $endHour]);
+        }
+        if ($storeId) $completedQuery->where('orders.store_id', $storeId);
+        if ($source) $completedQuery->where('orders.source', $source);
+        if ($createdBy) $completedQuery->where('orders.created_by', $createdBy);
+
+        $completedRows = $completedQuery
+            ->selectRaw("
+                {$dateExpr} as period_key,
+                COALESCE(SUM(orders.subtotal), 0) as gross_sales,
+                COALESCE(SUM(orders.discount_total), 0) as discounts,
+                COALESCE(SUM(orders.tax_total), 0) as taxes,
+                COALESCE(SUM(orders.service_total), 0) as services,
+                COALESCE(SUM(orders.grand_total), 0) as net_sales,
+                COUNT(*) as order_count
+            ")
+            ->groupBy('period_key')
+            ->orderBy('period_key')
+            ->get()
+            ->keyBy('period_key');
+
+        // --- Refunded orders: refunds ---
+        $refundedQuery = $conn->table('orders')
+            ->where($baseWhere)
+            ->where('orders.status', 'refunded')
+            ->whereBetween('orders.created_at', [$startDate, $endDate]);
+
+        if ($startHour !== null && $endHour !== null) {
+            $refundedQuery->whereRaw('HOUR(orders.created_at) BETWEEN ? AND ?', [$startHour, $endHour]);
+        }
+        if ($storeId) $refundedQuery->where('orders.store_id', $storeId);
+        if ($source) $refundedQuery->where('orders.source', $source);
+        if ($createdBy) $refundedQuery->where('orders.created_by', $createdBy);
+
+        $refundedRows = $refundedQuery
+            ->selectRaw("
+                {$dateExpr} as period_key,
+                COALESCE(SUM(orders.grand_total), 0) as refunds
+            ")
+            ->groupBy('period_key')
+            ->orderBy('period_key')
+            ->get()
+            ->keyBy('period_key');
+
+        // --- Gross profit (COGS) via order_items joined with products ---
+        // cost is stored on products table; order_items stores product_snapshot JSON
+        $hasCostColumn = false;
+        try {
+            $hasCostColumn = $conn->getSchemaBuilder()->hasColumn('products', 'cost');
+        } catch (\Exception $e) {
+            $hasCostColumn = false;
+        }
+
+        $costRows = collect();
+        if ($hasCostColumn) {
+            $costQuery = $conn->table('order_items')
+                ->join('orders', 'orders.id', '=', 'order_items.order_id')
+                ->leftJoin('products', 'products.id', '=', DB::raw("JSON_UNQUOTE(JSON_EXTRACT(order_items.product_snapshot, '$.id'))"))
+                ->where('orders.tenant_id', $user->tenant_id)
+                ->where('orders.status', 'completed')
+                ->whereBetween('orders.created_at', [$startDate, $endDate])
+                ->whereNotNull('order_items.product_snapshot');
+
+            if ($startHour !== null && $endHour !== null) {
+                $costQuery->whereRaw('HOUR(orders.created_at) BETWEEN ? AND ?', [$startHour, $endHour]);
+            }
+            if ($storeId) $costQuery->where('orders.store_id', $storeId);
+            if ($source) $costQuery->where('orders.source', $source);
+            if ($createdBy) $costQuery->where('orders.created_by', $createdBy);
+
+            $costRows = $costQuery
+                ->selectRaw("
+                    {$dateExpr} as period_key,
+                    COALESCE(SUM(order_items.quantity * COALESCE(products.cost, 0)), 0) as cogs
+                ")
+                ->groupBy('period_key')
+                ->orderBy('period_key')
+                ->get()
+                ->keyBy('period_key');
+        }
+
+        // Merge all rows by period_key
+        $allKeys = $completedRows->keys()
+            ->merge($refundedRows->keys())
+            ->merge($costRows->keys())
+            ->unique()
+            ->sort()
+            ->values();
+
+        $series = $allKeys->map(function ($key) use ($completedRows, $refundedRows, $costRows) {
+            $completed = $completedRows->get($key);
+            $refunded = $refundedRows->get($key);
+            $cost = $costRows->get($key);
+
+            $grossSales = (float) ($completed->gross_sales ?? 0);
+            $discounts = (float) ($completed->discounts ?? 0);
+            $netSales = (float) ($completed->net_sales ?? 0);
+            $refunds = (float) ($refunded->refunds ?? 0);
+            $cogs = (float) ($cost->cogs ?? 0);
+            $grossProfit = $netSales - $cogs;
+
+            return [
+                'period' => $key,
+                'gross_sales' => $grossSales,
+                'refunds' => $refunds,
+                'discounts' => $discounts,
+                'net_sales' => $netSales,
+                'gross_profit' => $grossProfit,
+                'cogs' => $cogs,
+                'order_count' => (int) ($completed->order_count ?? 0),
+            ];
+        })->values();
+
+        // Totals across the whole period
+        $totals = [
+            'gross_sales' => (float) $series->sum('gross_sales'),
+            'refunds' => (float) $series->sum('refunds'),
+            'discounts' => (float) $series->sum('discounts'),
+            'net_sales' => (float) $series->sum('net_sales'),
+            'gross_profit' => (float) $series->sum('gross_profit'),
+            'cogs' => (float) $series->sum('cogs'),
+            'order_count' => (int) $series->sum('order_count'),
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'period' => [
+                    'start_date' => $startDate->toDateString(),
+                    'end_date' => $endDate->toDateString(),
+                    'timezone' => $timezone,
+                ],
+                'filters' => [
+                    'store_id' => $storeId,
+                    'source' => $source,
+                    'created_by' => $createdBy,
+                    'start_hour' => $startHour,
+                    'end_hour' => $endHour,
+                    'group_by' => $groupBy,
+                ],
+                'totals' => $totals,
+                'series' => $series,
+            ],
+        ]);
+    }
+
+    /**
      * Get sales summary (aggregated metrics) for the authenticated user's tenant.
      *
      * Supported query params:

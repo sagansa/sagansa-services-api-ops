@@ -30,6 +30,7 @@ class Product extends Model
         'type',
         'bundle_pricing_mode',
         'price',
+        'cost',
         'image',
         'sku',
         'barcode',
@@ -50,6 +51,7 @@ class Product extends Model
      */
     protected $casts = [
         'price' => 'integer',
+        'cost' => 'integer',
         'stock' => 'integer',
         'is_active' => 'boolean',
         'request' => 'boolean',
