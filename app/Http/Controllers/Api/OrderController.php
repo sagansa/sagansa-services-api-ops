@@ -322,23 +322,26 @@ class OrderController extends Controller
             ->get();
 
         // --- Top Products ---
+        // Note: order_items no longer has a product_id column (dropped in
+        // 2025_11_23_150402). Product info is stored in the product_snapshot
+        // JSON column, so we extract id/name from there instead of joining.
         $topProductsQuery = $conn->table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
-            ->join('products', 'products.id', '=', 'order_items.product_id')
             ->where('orders.tenant_id', $user->tenant_id)
             ->where('orders.status', 'completed')
-            ->whereBetween('orders.created_at', [$startDate, $endDate]);
+            ->whereBetween('orders.created_at', [$startDate, $endDate])
+            ->whereNotNull('order_items.product_snapshot');
         if ($storeId) $topProductsQuery->where('orders.store_id', $storeId);
         if ($source) $topProductsQuery->where('orders.source', $source);
 
         $topProductsRows = $topProductsQuery
             ->selectRaw("
-                order_items.product_id,
-                products.name as product_name,
+                JSON_UNQUOTE(JSON_EXTRACT(order_items.product_snapshot, '$.id')) as product_id,
+                JSON_UNQUOTE(JSON_EXTRACT(order_items.product_snapshot, '$.name')) as product_name,
                 SUM(order_items.quantity) as total_quantity,
                 COALESCE(SUM(order_items.total_price), 0) as total_revenue
             ")
-            ->groupBy('order_items.product_id', 'products.name')
+            ->groupBy('product_id', 'product_name')
             ->orderByDesc('total_quantity')
             ->limit(10)
             ->get();
