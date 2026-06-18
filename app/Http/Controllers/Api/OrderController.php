@@ -35,15 +35,22 @@ class OrderController extends Controller
             'payment_type_id' => 'nullable|exists:payment_type,id',
             'source' => 'required|in:pos,web-order',
             'order_items' => 'required|array',
-            'order_items.*.product_id' => 'required|exists:products,id',
+            'order_items.*.product_id' => 'nullable|exists:products,id',
+            // Product info is captured in a JSON snapshot for historical accuracy.
+            // Accept either the legacy `name_snapshot`/`variants` shape (deprecated)
+            // or the new `product`/`variant`/`modifications` snapshot shape.
+            'order_items.*.name' => 'nullable|string',
+            'order_items.*.name_snapshot' => 'nullable|string',
+            'order_items.*.product' => 'nullable|array',
+            'order_items.*.variant' => 'nullable',
             'order_items.*.variants' => 'nullable|array',
-            'order_items.*.variants.*.product_variant_id' => 'required|exists:product_variants,id',
-            'order_items.*.variants.*.price' => 'required|numeric|min:0',
-            'order_items.*.variants.*.name' => 'required|string',
+            'order_items.*.variants.*.product_variant_id' => 'nullable|exists:product_variants,id',
+            'order_items.*.variants.*.price' => 'nullable|numeric|min:0',
+            'order_items.*.variants.*.name' => 'nullable|string',
+            'order_items.*.modifications' => 'nullable|array',
             'order_items.*.quantity' => 'required|integer|min:1',
             'order_items.*.unit_price' => 'required|numeric|min:0',
             'order_items.*.total_price' => 'required|numeric|min:0',
-            'order_items.*.name_snapshot' => 'required|string',
             'order_items.*.notes' => 'nullable|string',
             'is_offline' => 'boolean',
             'device_identifier' => 'nullable|string|max:255'
@@ -82,34 +89,65 @@ class OrderController extends Controller
                 'device_identifier' => $request->device_identifier,
             ]);
 
-            // Create order items
+            // Create order items using JSON snapshots (columns product_id /
+            // product_variant_id / name_snapshot were dropped in migration
+            // 2025_11_23_150402). We build snapshots compatible with the
+            // api-mobile order creation flow so receipts stay consistent.
             foreach ($request->order_items as $itemData) {
+                // --- Build product_snapshot ---
+                $productSnapshot = $itemData['product'] ?? null;
+                if (!is_array($productSnapshot)) {
+                    // Normalize legacy payload (name_snapshot + product_id) into snapshot
+                    $productSnapshot = [
+                        'id' => $itemData['product_id'] ?? null,
+                        'name' => $itemData['name_snapshot'] ?? ($itemData['name'] ?? null),
+                        'price' => (float) ($itemData['unit_price'] ?? 0),
+                    ];
+                }
+
+                // --- Build variant_snapshot ---
+                // Prefer new `variant` key; fall back to legacy `variants` array.
+                $variantSnapshot = $itemData['variant'] ?? null;
+                if ($variantSnapshot === null && isset($itemData['variants']) && is_array($itemData['variants'])) {
+                    $variantSnapshot = $itemData['variants'];
+                }
+
+                // --- Build modifications_snapshot ---
+                $modificationsSnapshot = isset($itemData['modifications']) && is_array($itemData['modifications'])
+                    ? $itemData['modifications']
+                    : [];
+
                 $orderItem = $order->orderItems()->create([
-                    'product_id' => $itemData['product_id'],
-                    'name_snapshot' => $itemData['name_snapshot'],
+                    'store_id' => $request->store_id,
+                    'product_snapshot' => $productSnapshot,
+                    'variant_snapshot' => $variantSnapshot,
+                    'modifications_snapshot' => $modificationsSnapshot,
                     'quantity' => $itemData['quantity'],
                     'unit_price' => $itemData['unit_price'],
                     'total_price' => $itemData['total_price'],
                     'notes' => $itemData['notes'] ?? null,
                 ]);
 
-                // Handle variants if any
+                // Handle legacy variants array (create OrderItemVariant rows)
                 if (isset($itemData['variants']) && is_array($itemData['variants'])) {
                     foreach ($itemData['variants'] as $variantData) {
+                        if (!is_array($variantData)) {
+                            continue;
+                        }
                         $orderItem->variants()->create([
-                            'product_variant_id' => $variantData['product_variant_id'],
-                            'name' => $variantData['name'],
-                            'price' => $variantData['price'],
+                            'product_variant_id' => $variantData['product_variant_id'] ?? null,
+                            'name' => $variantData['name'] ?? null,
+                            'price' => $variantData['price'] ?? 0,
                         ]);
                     }
                 }
 
-                // Handle modifications if any
+                // Handle modifications (create OrderItemModification rows)
                 if (isset($itemData['modifications']) && is_array($itemData['modifications'])) {
                     foreach ($itemData['modifications'] as $modData) {
                         $orderItem->orderItemModifications()->create([
-                            'product_modification_id' => $modData['product_modification_id'],
-                            'price' => $modData['price'],
+                            'product_modification_id' => $modData['product_modification_id'] ?? null,
+                            'price' => $modData['price'] ?? 0,
                             'quantity' => $modData['quantity'] ?? 1,
                         ]);
                     }
@@ -120,7 +158,7 @@ class OrderController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $order->load(['orderItems', 'orderItems.product', 'orderItems.variants'])
+                'data' => $order->load(['orderItems', 'orderItems.variants', 'orderItems.orderItemModifications'])
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -151,7 +189,9 @@ class OrderController extends Controller
             ->with([
                 'store:id,name,nickname',
                 'orderItems' => function ($q) {
-                    $q->select(['id', 'order_id', 'name_snapshot', 'quantity', 'unit_price', 'total_price'])
+                    // order_items no longer has name_snapshot/product_id columns;
+                    // product info is stored in the product_snapshot JSON column.
+                    $q->select(['id', 'order_id', 'product_snapshot', 'quantity', 'unit_price', 'total_price'])
                         ->limit(5);
                 },
             ])
@@ -270,7 +310,7 @@ class OrderController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $order->load(['orderItems', 'orderItems.product', 'orderItems.variants'])
+            'data' => $order->load(['orderItems', 'orderItems.variants', 'orderItems.orderItemModifications'])
         ]);
     }
 
