@@ -132,59 +132,97 @@ class OrderController extends Controller
     }
 
     /**
-     * Get orders for the authenticated user
+     * Get orders for the authenticated user (used by Receipts list)
+     *
+     * Supported query params:
+     *  - store_id    uuid     optional
+     *  - status      string   optional (pending|completed|cancelled|refunded)
+     *  - source      string   optional (pos|web-order)
+     *  - start_date  Y-m-d    optional
+     *  - end_date    Y-m-d    optional
+     *  - search      string   optional (matches receipt_number, customer_name, table_code)
+     *  - per_page    int      default 15
      */
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        
+
         $query = Order::where('tenant_id', $user->tenant_id)
-            ->with(['orderItems', 'orderItems.product', 'orderItems.variants'])
+            ->with([
+                'store:id,name,nickname',
+                'orderItems' => function ($q) {
+                    $q->select(['id', 'order_id', 'name_snapshot', 'quantity', 'unit_price', 'total_price'])
+                        ->limit(5);
+                },
+            ])
             ->orderBy('created_at', 'desc');
 
-        // Add optional filters
-        if ($request->has('store_id')) {
+        if ($request->filled('store_id')) {
             $query->where('store_id', $request->store_id);
         }
-        
-        if ($request->has('status')) {
+
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
-        
-        if ($request->has('source')) {
+
+        if ($request->filled('source')) {
             $query->where('source', $request->source);
         }
-        
-        $orders = $query->paginate($request->get('per_page', 10));
+
+        if ($request->filled('start_date')) {
+            $query->where('created_at', '>=', $request->start_date . ' 00:00:00');
+        }
+
+        if ($request->filled('end_date')) {
+            $query->where('created_at', '<=', $request->end_date . ' 23:59:59');
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('customer_name', 'like', "%{$search}%")
+                    ->orWhere('table_code', 'like', "%{$search}%")
+                    ->orWhere('id', 'like', "%{$search}%");
+            });
+        }
+
+        $perPage = (int) $request->get('per_page', 15);
+        $orders = $query->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data' => $orders
+            'data' => $orders,
         ]);
     }
 
     /**
-     * Get a specific order
+     * Get a specific order with full detail for receipt view.
      */
     public function show(Request $request, string $orderId): JsonResponse
     {
         $user = $request->user();
-        
+
         $order = Order::where('id', $orderId)
             ->where('tenant_id', $user->tenant_id)
-            ->with(['orderItems', 'orderItems.product', 'orderItems.variants', 'orderItems.orderItemModifications'])
+            ->with([
+                'store',
+                'paymentType',
+                'orderItems.variants',
+                'orderItems.orderItemModifications',
+                'orderPayments.paymentType',
+            ])
             ->first();
 
         if (!$order) {
             return response()->json([
                 'success' => false,
-                'message' => 'Order not found'
+                'message' => 'Order not found',
             ], 404);
         }
 
         return response()->json([
             'success' => true,
-            'data' => $order
+            'data' => $order,
         ]);
     }
 

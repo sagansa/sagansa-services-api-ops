@@ -40,6 +40,7 @@ class Order extends Model
 
     protected $appends = [
         'receipt_number',
+        'time_ago',
     ];
 
     protected $casts = [
@@ -84,5 +85,25 @@ class Order extends Model
     public function orderPayments(): HasMany
     {
         return $this->hasMany(OrderPayment::class);
+    }
+
+    /**
+     * Generate a human-readable receipt number from the order's UUID.
+     * Format: RCP-YYMMDD-XXXX (XXXX = first 4 chars of UUID uppercase)
+     */
+    public function getReceiptNumberAttribute(): string
+    {
+        $date = $this->created_at?->format('ymd') ?? '000000';
+        $shortId = strtoupper(substr((string) $this->id, 0, 4));
+
+        return "RCP-{$date}-{$shortId}";
+    }
+
+    /**
+     * Generate a human-readable "time ago" string (e.g. "2 hours ago").
+     */
+    public function getTimeAgoAttribute(): string
+    {
+        return $this->created_at?->diffForHumans() ?? '';
     }
 }
