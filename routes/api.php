@@ -111,6 +111,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     // Orders
     Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/orders', [OrderController::class, 'store']);
+    Route::get('/orders/summary', [OrderController::class, 'summary']);
     Route::get('/orders/{orderId}', [OrderController::class, 'show']);
     Route::put('/orders/{orderId}', [OrderController::class, 'update']);
 
