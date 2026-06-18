@@ -11,6 +11,7 @@ class PaymentType extends Model
     use HasUuids;
     use HasFactory;
 
+    protected $connection = 'mysql_ops';
     protected $table = 'payment_type';
     protected $fillable = ['name', 'is_active'];
 

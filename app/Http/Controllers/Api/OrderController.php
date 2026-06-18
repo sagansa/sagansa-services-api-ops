@@ -187,7 +187,16 @@ class OrderController extends Controller
         }
 
         $perPage = (int) $request->get('per_page', 15);
-        $orders = $query->paginate($perPage);
+
+        try {
+            $orders = $query->paginate($perPage);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch orders: ' . $e->getMessage(),
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null,
+            ], 500);
+        }
 
         return response()->json([
             'success' => true,
@@ -202,16 +211,24 @@ class OrderController extends Controller
     {
         $user = $request->user();
 
-        $order = Order::where('id', $orderId)
-            ->where('tenant_id', $user->tenant_id)
-            ->with([
-                'store',
-                'paymentType',
-                'orderItems.variants',
-                'orderItems.orderItemModifications',
-                'orderPayments.paymentType',
-            ])
-            ->first();
+        try {
+            $order = Order::where('id', $orderId)
+                ->where('tenant_id', $user->tenant_id)
+                ->with([
+                    'store',
+                    'paymentType',
+                    'orderItems.variants',
+                    'orderItems.orderItemModifications',
+                    'orderPayments.paymentType',
+                ])
+                ->first();
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch order detail: ' . $e->getMessage(),
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null,
+            ], 500);
+        }
 
         if (!$order) {
             return response()->json([

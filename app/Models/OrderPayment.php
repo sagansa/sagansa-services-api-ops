@@ -12,6 +12,8 @@ class OrderPayment extends Model
 {
     use HasFactory, HasUuids, SoftDeletes;
 
+    protected $connection = 'mysql_ops';
+
     protected $fillable = [
         'order_id',
         'amount',

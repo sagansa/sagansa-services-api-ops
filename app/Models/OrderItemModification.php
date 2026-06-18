@@ -11,6 +11,8 @@ class OrderItemModification extends Model
 {
     use HasFactory, HasUuids;
 
+    protected $connection = 'mysql_ops';
+
     protected $fillable = [
         'order_item_id',
         'product_modification_id',

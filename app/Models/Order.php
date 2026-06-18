@@ -13,6 +13,8 @@ class Order extends Model
 {
     use HasFactory, HasUuids, SoftDeletes;
 
+    protected $connection = 'mysql_ops';
+
     protected $fillable = [
         'tenant_id',
         'store_id',
