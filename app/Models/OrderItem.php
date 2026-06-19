@@ -21,8 +21,10 @@ class OrderItem extends Model
         'variant_snapshot',
         'modifications_snapshot',
         'quantity',
+        'quantity_refunded',
         'unit_price',
         'total_price',
+        'refund_amount',
         'notes',
     ];
 
@@ -58,5 +60,10 @@ class OrderItem extends Model
     public function orderItemModifications(): HasMany
     {
         return $this->hasMany(OrderItemModification::class);
+    }
+
+    public function refundItems(): HasMany
+    {
+        return $this->hasMany(RefundItem::class);
     }
 }

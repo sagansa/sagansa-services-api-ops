@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\PaymentType;
 use App\Models\Store;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -36,9 +37,6 @@ class OrderController extends Controller
             'source' => 'required|in:pos,web-order',
             'order_items' => 'required|array',
             'order_items.*.product_id' => 'nullable|exists:products,id',
-            // Product info is captured in a JSON snapshot for historical accuracy.
-            // Accept either the legacy `name_snapshot`/`variants` shape (deprecated)
-            // or the new `product`/`variant`/`modifications` snapshot shape.
             'order_items.*.name' => 'nullable|string',
             'order_items.*.name_snapshot' => 'nullable|string',
             'order_items.*.product' => 'nullable|array',
@@ -56,7 +54,6 @@ class OrderController extends Controller
             'device_identifier' => 'nullable|string|max:255'
         ]);
 
-        // Verify that the store belongs to the user's tenant
         $store = Store::where('id', $request->store_id)
             ->where('tenant_id', $user->tenant_id)
             ->first();
@@ -89,15 +86,9 @@ class OrderController extends Controller
                 'device_identifier' => $request->device_identifier,
             ]);
 
-            // Create order items using JSON snapshots (columns product_id /
-            // product_variant_id / name_snapshot were dropped in migration
-            // 2025_11_23_150402). We build snapshots compatible with the
-            // api-mobile order creation flow so receipts stay consistent.
             foreach ($request->order_items as $itemData) {
-                // --- Build product_snapshot ---
                 $productSnapshot = $itemData['product'] ?? null;
                 if (!is_array($productSnapshot)) {
-                    // Normalize legacy payload (name_snapshot + product_id) into snapshot
                     $productSnapshot = [
                         'id' => $itemData['product_id'] ?? null,
                         'name' => $itemData['name_snapshot'] ?? ($itemData['name'] ?? null),
@@ -105,14 +96,11 @@ class OrderController extends Controller
                     ];
                 }
 
-                // --- Build variant_snapshot ---
-                // Prefer new `variant` key; fall back to legacy `variants` array.
                 $variantSnapshot = $itemData['variant'] ?? null;
                 if ($variantSnapshot === null && isset($itemData['variants']) && is_array($itemData['variants'])) {
                     $variantSnapshot = $itemData['variants'];
                 }
 
-                // --- Build modifications_snapshot ---
                 $modificationsSnapshot = isset($itemData['modifications']) && is_array($itemData['modifications'])
                     ? $itemData['modifications']
                     : [];
@@ -128,7 +116,6 @@ class OrderController extends Controller
                     'notes' => $itemData['notes'] ?? null,
                 ]);
 
-                // Handle legacy variants array (create OrderItemVariant rows)
                 if (isset($itemData['variants']) && is_array($itemData['variants'])) {
                     foreach ($itemData['variants'] as $variantData) {
                         if (!is_array($variantData)) {
@@ -142,7 +129,6 @@ class OrderController extends Controller
                     }
                 }
 
-                // Handle modifications (create OrderItemModification rows)
                 if (isset($itemData['modifications']) && is_array($itemData['modifications'])) {
                     foreach ($itemData['modifications'] as $modData) {
                         $orderItem->orderItemModifications()->create([
@@ -170,16 +156,42 @@ class OrderController extends Controller
     }
 
     /**
+     * Resolve user names from mysql_auth for a collection of orders.
+     * Cross-database Eloquent relationships don't work reliably, so we
+     * fetch user names manually and attach them to each order.
+     */
+    private function attachCreatorNames($orders): void
+    {
+        $userKeys = $orders->pluck('created_by')->filter()->unique()->values();
+
+        if ($userKeys->isEmpty()) {
+            return;
+        }
+
+        try {
+            // Use the mysql_auth connection explicitly for cross-database query
+            $names = DB::connection('mysql_auth')
+                ->table('users')
+                ->whereIn('uuid', $userKeys)
+                ->pluck('name', 'uuid');
+
+            $orders->each(function ($order) use ($names) {
+                $createdBy = $order->created_by;
+                if ($createdBy && $names->has($createdBy)) {
+                    $order->setAttribute('creator', ['name' => $names->get($createdBy)]);
+                } else {
+                    $order->setAttribute('creator', null);
+                }
+            });
+        } catch (\Exception $e) {
+            $orders->each(function ($order) {
+                $order->setAttribute('creator', null);
+            });
+        }
+    }
+
+    /**
      * Get orders for the authenticated user (used by Receipts list)
-     *
-     * Supported query params:
-     *  - store_id    uuid     optional
-     *  - status      string   optional (pending|completed|cancelled|refunded)
-     *  - source      string   optional (pos|web-order)
-     *  - start_date  Y-m-d    optional
-     *  - end_date    Y-m-d    optional
-     *  - search      string   optional (matches receipt_number, customer_name, table_code)
-     *  - per_page    int      default 15
      */
     public function index(Request $request): JsonResponse
     {
@@ -189,8 +201,6 @@ class OrderController extends Controller
             ->with([
                 'store:id,name,nickname',
                 'orderItems' => function ($q) {
-                    // order_items no longer has name_snapshot/product_id columns;
-                    // product info is stored in the product_snapshot JSON column.
                     $q->select(['id', 'order_id', 'product_snapshot', 'quantity', 'unit_price', 'total_price'])
                         ->limit(5);
                 },
@@ -238,6 +248,9 @@ class OrderController extends Controller
             ], 500);
         }
 
+        // Manually attach creator names (cross-db relationship workaround)
+        $this->attachCreatorNames($orders->getCollection());
+
         return response()->json([
             'success' => true,
             'data' => $orders,
@@ -259,7 +272,9 @@ class OrderController extends Controller
                     'paymentType',
                     'orderItems.variants',
                     'orderItems.orderItemModifications',
+                    'orderItems.refundItems.refund',
                     'orderPayments.paymentType',
+                    'refunds.refundItems',
                 ])
                 ->first();
         } catch (\Exception $e) {
@@ -276,6 +291,9 @@ class OrderController extends Controller
                 'message' => 'Order not found',
             ], 404);
         }
+
+        // Manually attach creator name (cross-db relationship workaround)
+        $this->attachCreatorNames(collect([$order]));
 
         return response()->json([
             'success' => true,
@@ -315,30 +333,7 @@ class OrderController extends Controller
     }
 
     /**
-     * Get sales data for bar charts: gross sales, refunds, discounts,
-     * net sales, and gross profit, with grouping by day/hour/week/month.
-     *
-     * Definitions:
-     *  - Gross Sales   = SUM(subtotal) dari order completed
-     *                    (total harga sebelum discount/refund/tax/service)
-     *  - Refunds       = SUM(total_refunded) dari order yang punya refund
-     *                    (order tetap completed, refund dicatat di kolom
-     *                    total_refunded / order_items.refund_amount)
-     *  - Discounts     = SUM(discount_total) dari order completed
-     *  - Net Sales     = Gross Sales − Refunds − Discounts
-     *                    (pendapatan bersih setelah potongan)
-     *  - Gross Profit  = Net Sales − COGS
-     *                    (COGS = quantity × products.cost)
-     *
-     * Supported query params:
-     *  - start_date (Y-m-d)  default: today
-     *  - end_date   (Y-m-d)  default: today
-     *  - start_hour (0-23)   optional
-     *  - end_hour   (0-23)   optional
-     *  - store_id   uuid     optional
-     *  - created_by string   optional (employee/device identifier)
-     *  - source     string   optional (pos|web-order)
-     *  - group_by   string   optional (day|hour|week|month) default: day
+     * Get sales data for bar charts
      */
     public function chart(Request $request): JsonResponse
     {
@@ -371,7 +366,6 @@ class OrderController extends Controller
             ['orders.tenant_id', $user->tenant_id],
         ];
 
-        // Determine date grouping expression
         $dateExpr = match ($groupBy) {
             'hour' => "DATE_FORMAT(orders.created_at, '%Y-%m-%d %H:00')",
             'week' => "DATE_FORMAT(orders.created_at, '%x-W%v')",
@@ -379,7 +373,6 @@ class OrderController extends Controller
             default => "DATE(orders.created_at)",
         };
 
-        // Check which optional columns exist
         $hasTotalRefunded = false;
         $hasCostColumn = false;
         try {
@@ -391,7 +384,6 @@ class OrderController extends Controller
         } catch (\Exception $e) {
         }
 
-        // --- Completed orders: gross sales, discounts, refunds, taxes ---
         $completedQuery = $conn->table('orders')
             ->where($baseWhere)
             ->where('orders.status', 'completed')
@@ -423,7 +415,6 @@ class OrderController extends Controller
             ->get()
             ->keyBy('period_key');
 
-        // --- COGS via order_items joined with products ---
         $costRows = collect();
         if ($hasCostColumn) {
             $costQuery = $conn->table('order_items')
@@ -452,7 +443,6 @@ class OrderController extends Controller
                 ->keyBy('period_key');
         }
 
-        // Merge all rows by period_key
         $allKeys = $completedRows->keys()
             ->merge($costRows->keys())
             ->unique()
@@ -468,10 +458,7 @@ class OrderController extends Controller
             $refunds = (float) ($completed->refunds ?? 0);
             $cogs = (float) ($cost->cogs ?? 0);
 
-            // Net Sales = Gross Sales − Refunds − Discounts
             $netSales = $grossSales - $refunds - $discounts;
-
-            // Gross Profit = Net Sales − COGS
             $grossProfit = $netSales - $cogs;
 
             return [
@@ -486,7 +473,6 @@ class OrderController extends Controller
             ];
         })->values();
 
-        // Totals across the whole period
         $totals = [
             'gross_sales' => (float) $series->sum('gross_sales'),
             'refunds' => (float) $series->sum('refunds'),
@@ -514,7 +500,7 @@ class OrderController extends Controller
                     'group_by' => $groupBy,
                 ],
                 'definitions' => [
-                    'gross_sales' => 'SUM(subtotal) dari order completed — total harga sebelum discount/refund',
+                    'gross_sales' => 'SUM(subtotal) dari order completed',
                     'refunds' => 'SUM(total_refunded) dari order yang memiliki refund',
                     'discounts' => 'SUM(discount_total) dari order completed',
                     'net_sales' => 'Gross Sales − Refunds − Discounts',
@@ -528,13 +514,6 @@ class OrderController extends Controller
 
     /**
      * Get sales summary (aggregated metrics) for the authenticated user's tenant.
-     *
-     * Supported query params:
-     *  - start_date (Y-m-d)  default: today
-     *  - end_date   (Y-m-d)  default: today
-     *  - store_id   uuid      optional
-     *  - source     string    optional (pos|web-order)
-     *  - status     string    optional (defaults to completed when computing revenue)
      */
     public function summary(Request $request): JsonResponse
     {
@@ -550,10 +529,8 @@ class OrderController extends Controller
             ? Carbon::parse($request->get('end_date'), $timezone)->endOfDay()
             : (clone $today)->endOfDay();
 
-        // Use DB facade with explicit connection for reliability
         $conn = DB::connection('mysql_ops');
 
-        // Base WHERE conditions
         $baseWhere = [
             ['tenant_id', $user->tenant_id],
         ];
@@ -561,7 +538,6 @@ class OrderController extends Controller
         $storeId = $request->filled('store_id') ? $request->get('store_id') : null;
         $source = $request->filled('source') ? $request->get('source') : null;
 
-        // --- Totals (completed orders only for revenue) ---
         $totalsQuery = $conn->table('orders')
             ->where($baseWhere)
             ->where('status', 'completed')
@@ -589,7 +565,6 @@ class OrderController extends Controller
         $totalRevenue = (float) ($totalsRow->total_revenue ?? 0);
         $averageOrderValue = $totalOrders > 0 ? round($totalRevenue / $totalOrders, 2) : 0;
 
-        // --- By Status (all orders, not just completed) ---
         $byStatusQuery = $conn->table('orders')
             ->where($baseWhere)
             ->whereBetween('created_at', [$startDate, $endDate]);
@@ -601,13 +576,11 @@ class OrderController extends Controller
             ->groupBy('status')
             ->get();
 
-        // --- By Source ---
         $bySourceRows = (clone $byStatusQuery)
             ->selectRaw("source, COUNT(*) as count, COALESCE(SUM(grand_total), 0) as total")
             ->groupBy('source')
             ->get();
 
-        // --- By Store ---
         $byStoreQuery = $conn->table('orders')
             ->join('stores', 'stores.id', '=', 'orders.store_id')
             ->where('orders.tenant_id', $user->tenant_id)
@@ -628,14 +601,6 @@ class OrderController extends Controller
             ->orderByDesc('total')
             ->get();
 
-        // --- Top Products ---
-        // Note: order_items no longer has a product_id column (dropped in
-        // 2025_11_23_150402). Product info is stored in the product_snapshot
-        // JSON column, so we extract id/name from there instead of joining.
-        //
-        // We group ONLY by product_id so the same product always aggregates
-        // into a single row, even if its name differs across snapshots
-        // (e.g. product was renamed). MAX() picks one representative name.
         $topProductsQuery = $conn->table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
             ->where('orders.tenant_id', $user->tenant_id)
@@ -657,10 +622,6 @@ class OrderController extends Controller
             ->limit(10)
             ->get();
 
-        // --- By Payment Method ---
-        // POS orders store payment info in orders.payment_method (string) and
-        // orders.payment_snapshot (JSON). We group by payment_method directly
-        // since payment_type_id is typically null for POS transactions.
         $byPaymentTypeRows = collect();
         try {
             $hasPaymentMethodColumn = $conn->getSchemaBuilder()->hasColumn('orders', 'payment_method');
@@ -692,7 +653,6 @@ class OrderController extends Controller
                     ]);
             }
         } catch (\Exception $e) {
-            // If payment_method column doesn't exist or query fails, return empty
             $byPaymentTypeRows = collect();
         }
 

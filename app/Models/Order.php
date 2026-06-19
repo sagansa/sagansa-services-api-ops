@@ -23,12 +23,16 @@ class Order extends Model
         'customer_name',
         'table_code',
         'status',
+        'payment_status',
         'subtotal',
         'discount_total',
         'tax_total',
         'service_total',
         'grand_total',
+        'total_refunded',
+        'refund_count',
         'payment_type_id',
+        'payment_method',
         'paid_at',
         'source', // pos, web-order
         'device_identifier',
@@ -74,6 +78,15 @@ class Order extends Model
         return $this->belongsTo(Store::class);
     }
 
+    /**
+     * User (or device) that created this order.
+     * Crosses database connections (mysql_auth.users <-> mysql_ops.orders).
+     */
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by', 'uuid');
+    }
+
     public function paymentType(): BelongsTo
     {
         return $this->belongsTo(PaymentType::class);
@@ -90,15 +103,26 @@ class Order extends Model
     }
 
     /**
-     * Generate a human-readable receipt number from the order's UUID.
-     * Format: RCP-YYMMDD-XXXX (XXXX = first 4 chars of UUID uppercase)
+     * Alias for orderPayments() — used by the refund flow.
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(OrderPayment::class);
+    }
+
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(Refund::class);
+    }
+
+    /**
+     * Generate a receipt number — matches the api-mobile implementation
+     * (first 8 chars of the order UUID) so receipts are consistent across
+     * POS, mobile, and ops apps.
      */
     public function getReceiptNumberAttribute(): string
     {
-        $date = $this->created_at?->format('ymd') ?? '000000';
-        $shortId = strtoupper(substr((string) $this->id, 0, 4));
-
-        return "RCP-{$date}-{$shortId}";
+        return strtoupper(substr((string) $this->id, 0, 8));
     }
 
     /**
@@ -107,5 +131,21 @@ class Order extends Model
     public function getTimeAgoAttribute(): string
     {
         return $this->created_at?->diffForHumans() ?? '';
+    }
+
+    /**
+     * Whether the order has been paid (i.e. has a paid_at timestamp).
+     */
+    public function isPaid(): bool
+    {
+        return !is_null($this->paid_at);
+    }
+
+    /**
+     * Whether the order is fully refunded.
+     */
+    public function isFullyRefunded(): bool
+    {
+        return (float) ($this->total_refunded ?? 0) >= (float) $this->grand_total;
     }
 }

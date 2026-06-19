@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\ShiftStoreController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\PrinterController;
 use App\Http\Controllers\Api\LeaveController;
+use App\Http\Controllers\Api\RefundController;
 use App\Http\Controllers\Api\RoleController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
@@ -108,6 +109,16 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::put('/product-prices/{productPrice}', [\App\Http\Controllers\Api\ProductPriceController::class, 'update']);
     Route::delete('/product-prices/{productPrice}', [\App\Http\Controllers\Api\ProductPriceController::class, 'destroy']);
     
+    // Refunds — manager/owner only (role check + active tenant context for owner fallback)
+    // Registered BEFORE /orders/{orderId} so the nested refund routes are not
+    // swallowed by the wildcard order route.
+    Route::middleware(['active.tenant', 'role:manager|owner'])->group(function () {
+        Route::get('/refunds', [RefundController::class, 'index']);
+        Route::get('/refunds/{refundId}', [RefundController::class, 'show']);
+        Route::get('/orders/{orderId}/refund-eligibility', [RefundController::class, 'checkEligibility']);
+        Route::post('/orders/{orderId}/refund', [RefundController::class, 'store']);
+    });
+
     // Orders
     Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/orders', [OrderController::class, 'store']);
