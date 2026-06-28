@@ -102,16 +102,20 @@ class AuthController extends Controller
         // Load owned tenant to check if user is an owner
         $user->load('ownedTenant');
 
-        $hasTenant = $this->ensureOwnerAccess($user);
+        // Super-admin tidak butuh tenant (cross-tenant, platform-level).
+        // Skip tenant setup check agar bisa langsung masuk dashboard.
+        if (! $isSuperAdmin) {
+            $hasTenant = $this->ensureOwnerAccess($user);
 
-        if (!$hasTenant) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Tenant setup is required before accessing apps/ops.',
-                'requires_tenant_setup' => true,
-                'token' => $plainTextToken,
-                'token_type' => 'Bearer',
-            ], 409);
+            if (!$hasTenant) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Tenant setup is required before accessing apps/ops.',
+                    'requires_tenant_setup' => true,
+                    'token' => $plainTextToken,
+                    'token_type' => 'Bearer',
+                ], 409);
+            }
         }
 
         // Only set tenant context for non-super-admin users
@@ -195,16 +199,6 @@ class AuthController extends Controller
             $user->save(); // Persist the change so load() uses the correct tenant
         }
 
-        $hasTenant = $this->ensureOwnerAccess($user);
-
-        if (!$hasTenant) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Tenant setup is required before accessing apps/ops.',
-                'requires_tenant_setup' => true,
-            ], 409);
-        }
-        
         // Check if user is super-admin (global role) before setting tenant context
         $isSuperAdmin = \Illuminate\Support\Facades\DB::connection('mysql_auth')->table('model_has_roles')
             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
@@ -212,7 +206,21 @@ class AuthController extends Controller
             ->where('model_has_roles.model_type', get_class($user))
             ->where('roles.name', 'super-admin')
             ->exists();
-        
+
+        // Super-admin tidak butuh tenant (cross-tenant, platform-level).
+        // Skip tenant setup check agar bisa langsung masuk dashboard.
+        if (! $isSuperAdmin) {
+            $hasTenant = $this->ensureOwnerAccess($user);
+
+            if (!$hasTenant) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Tenant setup is required before accessing apps/ops.',
+                    'requires_tenant_setup' => true,
+                ], 409);
+            }
+        }
+
         // Only set tenant context for non-super-admin users
         if (!$isSuperAdmin && $user->tenant_id) {
             $user->setTenantById($user->tenant_id);
