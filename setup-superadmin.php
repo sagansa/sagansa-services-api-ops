@@ -64,12 +64,12 @@ foreach (file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line)
 // ----------------------------------------------------------------------------
 // 3. Resolve DB credentials (auth DB = sagansa_user)
 // ----------------------------------------------------------------------------
-$host = $env['DB_HOST'] ?? $env['DB_AUTH_HOST'] ?? '127.0.0.1';
-$port = $env['DB_PORT'] ?? $env['DB_AUTH_PORT'] ?? '3306';
+$host = $env['DB_AUTH_HOST'] ?? $env['DB_HOST'] ?? '127.0.0.1';
+$port = $env['DB_AUTH_PORT'] ?? $env['DB_PORT'] ?? '3306';
 // Auth DB (tempat tabel users, roles, model_has_roles)
 $dbAuthName = $env['DB_AUTH_DATABASE'] ?? $env['DB_USER_DATABASE'] ?? 'sagansa_user';
-$dbUser = $env['DB_USERNAME'] ?? 'root';
-$dbPass = $env['DB_PASSWORD'] ?? '';
+$dbUser = $env['DB_AUTH_USERNAME'] ?? $env['DB_USERNAME'] ?? 'root';
+$dbPass = $env['DB_AUTH_PASSWORD'] ?? $env['DB_PASSWORD'] ?? '';
 // Ops DB (untuk cek tenant)
 $dbOpsName = $env['DB_DATABASE'] ?? $env['DB_OPS_DATABASE'] ?? 'sagansa_ops';
 
