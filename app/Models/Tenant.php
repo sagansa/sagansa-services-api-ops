@@ -25,10 +25,13 @@ class Tenant extends Model
         'owner_id',
         'operation_mode',
         'foodcourt_config',
+        'billing_exempt',
+        'subscription_status',
     ];
 
     protected $casts = [
         'foodcourt_config' => 'array',
+        'billing_exempt' => 'boolean',
     ];
 
     /**
@@ -87,6 +90,22 @@ class Tenant extends Model
     public function offlineSyncLogs(): HasMany
     {
         return $this->hasMany(OfflineSyncLog::class);
+    }
+
+    /**
+     * Subscription billing tenant (1 per tenant).
+     */
+    public function subscription()
+    {
+        return $this->hasOne(\App\Models\Subscription::class, 'tenant_id', 'id');
+    }
+
+    /**
+     * Billing cycles / invoices for the tenant.
+     */
+    public function billingCycles(): HasMany
+    {
+        return $this->hasMany(\App\Models\BillingCycle::class, 'tenant_id', 'id');
     }
 
     private function authTable(string $table): string

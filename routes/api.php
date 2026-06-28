@@ -231,6 +231,40 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/users/{user_id}/permissions', [\App\Http\Controllers\Api\TenantUserController::class, 'assignPermissions']);
         Route::delete('/users/{user_id}', [\App\Http\Controllers\Api\TenantUserController::class, 'removeUser']);
     });
+
+    // ==========================================================================
+    // SUBSCRIPTION & BILLING (PRD-SUBSCRIPTION.md)
+    // ==========================================================================
+
+    // User-facing billing (auth:sanctum, scope tenant aktif)
+    Route::prefix('billing')->group(function () {
+        Route::get('/subscription', [\App\Http\Controllers\Api\BillingController::class, 'subscription']);
+        Route::get('/dashboard', [\App\Http\Controllers\Api\BillingController::class, 'dashboard']);
+        Route::get('/cycles', [\App\Http\Controllers\Api\BillingController::class, 'cycles']);
+        Route::get('/cycles/current', [\App\Http\Controllers\Api\BillingController::class, 'currentCycle']);
+        Route::get('/cycles/{id}', [\App\Http\Controllers\Api\BillingController::class, 'showCycle']);
+        Route::get('/preview', [\App\Http\Controllers\Api\BillingController::class, 'preview']);
+        Route::post('/cycles/{id}/pay', [\App\Http\Controllers\Api\BillingController::class, 'pay']);
+    });
+
+    // Super-admin billing config (role:super-admin)
+    Route::middleware(['role:super-admin'])->prefix('billing/admin')->group(function () {
+        Route::get('/settings', [\App\Http\Controllers\Api\BillingAdminController::class, 'getSettings']);
+        Route::put('/settings', [\App\Http\Controllers\Api\BillingAdminController::class, 'updateSettings']);
+        Route::get('/plans', [\App\Http\Controllers\Api\BillingAdminController::class, 'getPlans']);
+        Route::put('/plans/{id}', [\App\Http\Controllers\Api\BillingAdminController::class, 'updatePlan']);
+        Route::get('/discounts', [\App\Http\Controllers\Api\BillingAdminController::class, 'getDiscounts']);
+        Route::post('/discounts', [\App\Http\Controllers\Api\BillingAdminController::class, 'createDiscount']);
+        Route::put('/discounts/{id}', [\App\Http\Controllers\Api\BillingAdminController::class, 'updateDiscount']);
+        Route::delete('/discounts/{id}', [\App\Http\Controllers\Api\BillingAdminController::class, 'deleteDiscount']);
+        Route::put('/tenants/{tenantId}/exempt', [\App\Http\Controllers\Api\BillingAdminController::class, 'setExemption']);
+    });
+});
+
+// Billing webhooks (PUBLIK tapi terverifikasi signature/token)
+Route::prefix('webhooks')->group(function () {
+    Route::post('/xendit', [\App\Http\Controllers\Api\BillingWebhookController::class, 'handleXendit']);
+    Route::post('/midtrans', [\App\Http\Controllers\Api\BillingWebhookController::class, 'handleMidtrans']);
 });
 
 // Other API routes would go here...
