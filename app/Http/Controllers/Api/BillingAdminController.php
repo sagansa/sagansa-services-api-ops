@@ -157,7 +157,60 @@ class BillingAdminController extends Controller
         return response()->json(['success' => true]);
     }
 
-    // ---- Tenant exemption ----
+    // ---- Tenant exemption & overview ----
+
+    /**
+     * GET /billing/admin/tenants — list all tenants with billing status (super-admin).
+     */
+    public function getTenants(Request $request): JsonResponse
+    {
+        $perPage = (int) $request->get('per_page', 25);
+        $query = Tenant::with(['subscription.plan'])
+            ->select('id', 'name', 'owner_id', 'billing_exempt', 'subscription_status', 'created_at')
+            ->orderByDesc('created_at');
+
+        $search = $request->get('search');
+        if ($search) {
+            $query->where('name', 'like', "%{$search}%");
+        }
+
+        $tenants = $query->paginate($perPage);
+
+        return response()->json([
+            'success' => true,
+            'data' => $tenants,
+        ]);
+    }
+
+    /**
+     * GET /billing/admin/billing-overview — list billing cycles across all tenants.
+     */
+    public function billingOverview(Request $request): JsonResponse
+    {
+        $perPage = (int) $request->get('per_page', 25);
+        $query = \App\Models\BillingCycle::with(['tenant:id,name', 'payments'])
+            ->orderByDesc('period_year')
+            ->orderByDesc('period_month');
+
+        $status = $request->get('status');
+        if ($status) {
+            $query->where('status', $status);
+        }
+
+        $search = $request->get('search');
+        if ($search) {
+            $query->whereHas('tenant', function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%");
+            });
+        }
+
+        $cycles = $query->paginate($perPage);
+
+        return response()->json([
+            'success' => true,
+            'data' => $cycles,
+        ]);
+    }
 
     public function setExemption(Request $request, string $tenantId): JsonResponse
     {

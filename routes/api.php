@@ -257,7 +257,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/discounts', [\App\Http\Controllers\Api\BillingAdminController::class, 'createDiscount']);
         Route::put('/discounts/{id}', [\App\Http\Controllers\Api\BillingAdminController::class, 'updateDiscount']);
         Route::delete('/discounts/{id}', [\App\Http\Controllers\Api\BillingAdminController::class, 'deleteDiscount']);
+        Route::get('/tenants', [\App\Http\Controllers\Api\BillingAdminController::class, 'getTenants']);
         Route::put('/tenants/{tenantId}/exempt', [\App\Http\Controllers\Api\BillingAdminController::class, 'setExemption']);
+        Route::get('/billing-overview', [\App\Http\Controllers\Api\BillingAdminController::class, 'billingOverview']);
     });
 });
 
