@@ -121,7 +121,7 @@ try {
 // ----------------------------------------------------------------------------
 // 5. Find user
 // ----------------------------------------------------------------------------
-$stmt = $pdo->prepare('SELECT id, uuid, name, email, tenant_id FROM users WHERE email = ? LIMIT 1');
+$stmt = $pdo->prepare('SELECT id, uuid, name, email FROM users WHERE email = ? LIMIT 1');
 $stmt->execute([$targetEmail]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -132,8 +132,8 @@ if (! $user) {
 }
 
 echo "User ditemukan:\n";
-printf("  id=%s  uuid=%s\n  name=%s  email=%s  tenant_id=%s\n\n",
-    $user['id'], $user['uuid'], $user['name'], $user['email'], $user['tenant_id'] ?: '(none)');
+printf("  id=%s  uuid=%s\n  name=%s  email=%s\n\n",
+    $user['id'], $user['uuid'], $user['name'], $user['email']);
 
 // ----------------------------------------------------------------------------
 // 6. Cek role 'super-admin' (guard=api)
@@ -189,12 +189,10 @@ if ($isSuperAdmin) {
 }
 
 // ----------------------------------------------------------------------------
-// 9. Info tenant (opsional)
+// 9. Info tambahan
 // ----------------------------------------------------------------------------
-if (! empty($user['tenant_id'])) {
-    echo "\nCatatan: User ini punya tenant_id={$user['tenant_id']}.\n";
-    echo "Super-admin idealnya cross-tenant (tenant_id boleh kosong).\n";
-}
+echo "\nCatatan: Super-admin adalah role cross-tenant (platform-level).\n";
+echo "User ini tetap bisa mengelola semua tenant tanpa perlu tenant_id.\n";
 
 echo "\nSelesai.\n";
 exit(0);
