@@ -19,6 +19,8 @@ class PlatformDashboardController extends Controller
 {
     /**
      * GET /api/platform/overview — summary utama.
+     * Resilient: setiap section di-try-catch sendiri agar tabel yang belum
+     * di-migrate tidak crash seluruh endpoint.
      */
     public function overview(): JsonResponse
     {
@@ -26,40 +28,72 @@ class PlatformDashboardController extends Controller
         $monthStart = now(config('app.timezone'))->startOfMonth()->toDateTimeString();
 
         // --- Tenant stats ---
-        $tenantStats = DB::connection('mysql_ops')->table('tenants')
-            ->select('subscription_status', DB::raw('COUNT(*) as count'))
-            ->groupBy('subscription_status')
-            ->pluck('count', 'subscription_status');
-
-        $totalTenants = $tenantStats->sum();
+        $tenantStats = collect();
+        $totalTenants = 0;
+        try {
+            $tenantStats = DB::connection('mysql_ops')->table('tenants')
+                ->select('subscription_status', DB::raw('COUNT(*) as count'))
+                ->groupBy('subscription_status')
+                ->pluck('count', 'subscription_status');
+            $totalTenants = $tenantStats->sum();
+        } catch (\Throwable $e) {
+        }
 
         // --- Billing stats (bulan ini) ---
-        $billingByStatus = DB::connection('mysql_ops')->table('billing_cycles')
-            ->where('created_at', '>=', $monthStart)
-            ->select('status', DB::raw('SUM(total_charge) as total'))
-            ->groupBy('status')
-            ->pluck('total', 'status');
-
-        $totalBilled = $billingByStatus->sum();
-        $totalPaid = (int) ($billingByStatus['paid'] ?? 0);
-        $totalOverdue = (int) ($billingByStatus['overdue'] ?? 0) + (int) ($billingByStatus['issued'] ?? 0);
-        $collectionRate = $totalBilled > 0 ? round($totalPaid / $totalBilled, 4) : 0;
+        $totalBilled = 0;
+        $totalPaid = 0;
+        $totalOverdue = 0;
+        $collectionRate = 0;
+        try {
+            $billingByStatus = DB::connection('mysql_ops')->table('billing_cycles')
+                ->where('created_at', '>=', $monthStart)
+                ->select('status', DB::raw('SUM(total_charge) as total'))
+                ->groupBy('status')
+                ->pluck('total', 'status');
+            $totalBilled = $billingByStatus->sum();
+            $totalPaid = (int) ($billingByStatus['paid'] ?? 0);
+            $totalOverdue = (int) ($billingByStatus['overdue'] ?? 0) + (int) ($billingByStatus['issued'] ?? 0);
+            $collectionRate = $totalBilled > 0 ? round($totalPaid / $totalBilled, 4) : 0;
+        } catch (\Throwable $e) {
+        }
 
         // --- Operations (today) ---
-        $orderStats = DB::connection('mysql_ops')->table('orders')
-            ->where('status', 'completed')
-            ->whereDate('created_at', $today)
-            ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(grand_total), 0) as revenue')
-            ->first();
+        $orderCount = 0;
+        $revenueToday = 0;
+        try {
+            $orderStats = DB::connection('mysql_ops')->table('orders')
+                ->where('status', 'completed')
+                ->whereDate('created_at', $today)
+                ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(grand_total), 0) as revenue')
+                ->first();
+            $orderCount = (int) ($orderStats->order_count ?? 0);
+            $revenueToday = (int) round($orderStats->revenue ?? 0);
+        } catch (\Throwable $e) {
+        }
 
-        $activeStores = (int) DB::connection('mysql_ops')->table('stores')
-            ->whereNull('deleted_at')
-            ->count();
+        // --- Stores ---
+        $activeStores = 0;
+        try {
+            // Coba dengan deleted_at dulu (setelah migration), fallback tanpa filter
+            $activeStores = (int) DB::connection('mysql_ops')->table('stores')
+                ->whereNull('deleted_at')
+                ->count();
+        } catch (\Throwable $e) {
+            try {
+                $activeStores = (int) DB::connection('mysql_ops')->table('stores')->count();
+            } catch (\Throwable $e2) {
+            }
+        }
 
-        $checkinsToday = (int) DB::connection('mysql_ops')->table('attendances')
-            ->whereDate('check_in', $today)
-            ->distinct('created_by')
-            ->count('created_by');
+        // --- Check-ins today ---
+        $checkinsToday = 0;
+        try {
+            $checkinsToday = (int) DB::connection('mysql_ops')->table('attendances')
+                ->whereDate('check_in', $today)
+                ->distinct('created_by')
+                ->count('created_by');
+        } catch (\Throwable $e) {
+        }
 
         return response()->json([
             'success' => true,
@@ -78,8 +112,8 @@ class PlatformDashboardController extends Controller
                     'collection_rate' => $collectionRate,
                 ],
                 'operations' => [
-                    'total_orders_today' => (int) ($orderStats->order_count ?? 0),
-                    'total_revenue_today' => (int) round($orderStats->revenue ?? 0),
+                    'total_orders_today' => $orderCount,
+                    'total_revenue_today' => $revenueToday,
                     'active_stores' => $activeStores,
                     'checkins_today' => $checkinsToday,
                 ],
@@ -94,10 +128,18 @@ class PlatformDashboardController extends Controller
     {
         $limit = min((int) $request->get('limit', 5), 20);
 
-        $tenants = Tenant::select('id', 'name', 'created_at', 'subscription_status', 'billing_exempt')
-            ->orderByDesc('created_at')
-            ->limit($limit)
-            ->get();
+        try {
+            $tenants = Tenant::select('id', 'name', 'created_at', 'subscription_status', 'billing_exempt')
+                ->orderByDesc('created_at')
+                ->limit($limit)
+                ->get();
+        } catch (\Throwable $e) {
+            // Fallback: tanpa kolom billing yang mungkin belum di-migrate
+            $tenants = Tenant::select('id', 'name', 'created_at')
+                ->orderByDesc('created_at')
+                ->limit($limit)
+                ->get();
+        }
 
         return response()->json(['success' => true, 'data' => $tenants]);
     }
@@ -144,22 +186,27 @@ class PlatformDashboardController extends Controller
     public function overdueBilling(): JsonResponse
     {
         $today = now(config('app.timezone'))->toDateString();
+        $overdue = collect();
 
-        $overdue = DB::connection('mysql_ops')->table('billing_cycles')
-            ->join('tenants', 'billing_cycles.tenant_id', '=', 'tenants.id')
-            ->whereIn('billing_cycles.status', ['issued', 'overdue'])
-            ->where('billing_cycles.due_at', '<', $today)
-            ->where('billing_cycles.total_charge', '>', 0)
-            ->select(
-                'tenants.id as tenant_id',
-                'tenants.name as tenant_name',
-                DB::raw('SUM(billing_cycles.total_charge) as total_charge'),
-                DB::raw('MIN(billing_cycles.due_at) as earliest_due')
-            )
-            ->groupBy('tenants.id', 'tenants.name')
-            ->orderByDesc('total_charge')
-            ->limit(10)
-            ->get();
+        try {
+            $overdue = DB::connection('mysql_ops')->table('billing_cycles')
+                ->join('tenants', 'billing_cycles.tenant_id', '=', 'tenants.id')
+                ->whereIn('billing_cycles.status', ['issued', 'overdue'])
+                ->where('billing_cycles.due_at', '<', $today)
+                ->where('billing_cycles.total_charge', '>', 0)
+                ->select(
+                    'tenants.id as tenant_id',
+                    'tenants.name as tenant_name',
+                    DB::raw('SUM(billing_cycles.total_charge) as total_charge'),
+                    DB::raw('MIN(billing_cycles.due_at) as earliest_due')
+                )
+                ->groupBy('tenants.id', 'tenants.name')
+                ->orderByDesc('total_charge')
+                ->limit(10)
+                ->get();
+        } catch (\Throwable $e) {
+            // billing_cycles table mungkin belum ada
+        }
 
         return response()->json([
             'success' => true,
