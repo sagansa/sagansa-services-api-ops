@@ -261,6 +261,17 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/tenants/{tenantId}/exempt', [\App\Http\Controllers\Api\BillingAdminController::class, 'setExemption']);
         Route::get('/billing-overview', [\App\Http\Controllers\Api\BillingAdminController::class, 'billingOverview']);
     });
+
+    // ==========================================================================
+    // PLATFORM DASHBOARD (super-admin, lintas-tenant)
+    // ==========================================================================
+    Route::middleware(['role:super-admin'])->prefix('platform')->group(function () {
+        Route::get('/overview', [\App\Http\Controllers\Api\PlatformDashboardController::class, 'overview']);
+        Route::get('/tenants/recent', [\App\Http\Controllers\Api\PlatformDashboardController::class, 'recentTenants']);
+        Route::get('/tenants/top-revenue', [\App\Http\Controllers\Api\PlatformDashboardController::class, 'topRevenue']);
+        Route::get('/billing/overdue', [\App\Http\Controllers\Api\PlatformDashboardController::class, 'overdueBilling']);
+        Route::get('/growth', [\App\Http\Controllers\Api\PlatformDashboardController::class, 'growth']);
+    });
 });
 
 // Billing webhooks (PUBLIK tapi terverifikasi signature/token)
