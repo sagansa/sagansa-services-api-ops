@@ -22,41 +22,43 @@ class SwitchTenantController extends Controller
         $targetTenantId = $request->tenant_id;
         $targetTenant = Tenant::find($targetTenantId);
 
-        // Verify that the user has access to this tenant
-        $hasTenantAccess = $user->tenants()->where('tenants.id', $targetTenantId)->exists();
-        $ownsTenant = $targetTenant && in_array((string) $targetTenant->owner_id, array_filter([
-            (string) $user->uuid,
-            (string) $user->id,
-        ]), true);
-
-        if (!$hasTenantAccess && !$ownsTenant) {
-            return response()->json([
-                'success' => false,
-                'message' => 'You do not have access to this tenant',
-            ], 403);
-        }
-
-        // If user is inactive, they can ONLY switch to their owned tenant
-        if (!$user->is_active) {
-            if (!$ownsTenant) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Your account is inactive. You can only access your owned tenant.',
-                ], 403);
-            }
-        }
-
-        // Update the user's active tenant_id
-        $user->tenant_id = $targetTenantId;
-        $user->save();
-
-        // Check if user is super-admin before setting tenant context
+        // Check if user is super-admin — bypass tenant access check
         $isSuperAdmin = DB::connection('mysql_auth')->table('model_has_roles')
             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
             ->where('model_has_roles.model_id', $user->id)
             ->where('model_has_roles.model_type', get_class($user))
             ->where('roles.name', 'super-admin')
             ->exists();
+
+        // Verify that the user has access to this tenant (skip for super-admin)
+        if (! $isSuperAdmin) {
+            $hasTenantAccess = $user->tenants()->where('tenants.id', $targetTenantId)->exists();
+            $ownsTenant = $targetTenant && in_array((string) $targetTenant->owner_id, array_filter([
+                (string) $user->uuid,
+                (string) $user->id,
+            ]), true);
+
+            if (!$hasTenantAccess && !$ownsTenant) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this tenant',
+                ], 403);
+            }
+
+            // If user is inactive, they can ONLY switch to their owned tenant
+            if (!$user->is_active) {
+                if (!$ownsTenant) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Your account is inactive. You can only access your owned tenant.',
+                    ], 403);
+                }
+            }
+        }
+
+        // Update the user's active tenant_id
+        $user->tenant_id = $targetTenantId;
+        $user->save();
 
         // Set tenant context for non-super-admin users
         if (!$isSuperAdmin) {
