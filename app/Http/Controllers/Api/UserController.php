@@ -15,11 +15,12 @@ class UserController extends Controller
 {
     /**
      * Display a listing of users
+     * Optimized: lightweight select + lazy-load relationships only for the current page.
      */
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        
+
         // Only super-admin can access global users endpoint
         if (!$user->hasRole('super-admin')) {
             return response()->json([
@@ -27,46 +28,59 @@ class UserController extends Controller
                 'message' => 'Unauthorized. Only super-admin can access this endpoint'
             ], 403);
         }
-        
-        // Check permission
-        if (!$user->can('access-backoffice')) {
-            return response()->json([
-                'success' => false,
-                'message' => 'You do not have permission to view users'
-            ], 403);
-        }
-        
-        $query = User::with(['tenant', 'roles', 'tenants']);
-        
-        // Filter by tenant for non-super-admin users
-        if (!$user->hasRole('super-admin')) {
-            $query->where('tenant_id', $user->tenant_id);
-        }
-        
-        // Apply filters
-        if ($request->has('search')) {
-            $search = $request->get('search');
+
+        // Build query with minimal columns (avoid SELECT *)
+        $query = User::query()
+            ->select('id', 'uuid', 'name', 'email', 'tenant_id', 'is_active', 'last_active_at', 'created_at', 'updated_at');
+
+        // Apply search BEFORE pagination
+        if ($search = $request->get('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                   ->orWhere('email', 'like', "%{$search}%");
             });
         }
-        
+
         if ($request->has('role')) {
             $query->whereHas('roles', function ($q) use ($request) {
                 $q->where('name', $request->get('role'));
             });
         }
-        
-        if ($request->has('tenant_id') && $user->hasRole('super-admin')) {
-            $query->where('tenant_id', $request->get('tenant_id'));
+
+        if ($tenantId = $request->get('tenant_id')) {
+            $query->where('tenant_id', $tenantId);
         }
-        
-        $users = $query->paginate($request->get('per_page', 15));
-        
+
+        $perPage = (int) $request->get('per_page', 25);
+        $users = $query->orderByDesc('created_at')->paginate($perPage);
+
+        // Lazy-load relationships ONLY for the current page items (not all users)
+        $items = $users->getCollection();
+        $items->load([
+            'roles:id,name',
+            'tenants' => function ($q) {
+                $q->select('tenants.id', 'tenants.name', 'tenants.operation_mode', 'tenants.owner_id')
+                  ->withPivot(['role', 'assigned_by']);
+            },
+        ]);
+
+        // Attach tenant info efficiently
+        $items->each(function ($u) {
+            $u->makeHidden(['updated_at']);
+            // Set tenant from first owner membership if not set
+            if (!$u->tenant_id) {
+                $ownerMembership = $u->tenants->firstWhere('pivot.role', 'owner');
+                if ($ownerMembership) {
+                    $u->setRelation('tenant', $ownerMembership);
+                }
+            } else {
+                $u->load('tenant:id,name,operation_mode,owner_id');
+            }
+        });
+
         return response()->json([
             'success' => true,
-            'users' => $users->items(),
+            'users' => $items->values(),
             'meta' => [
                 'current_page' => $users->currentPage(),
                 'total_pages' => $users->lastPage(),
