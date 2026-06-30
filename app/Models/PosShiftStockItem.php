@@ -10,6 +10,7 @@ class PosShiftStockItem extends Model
 {
     use HasFactory, HasUuids;
 
+    protected $connection = 'mysql_ops';
     protected $table = 'pos_shift_stock_items';
 
     protected $fillable = [

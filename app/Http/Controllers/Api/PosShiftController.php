@@ -110,23 +110,35 @@ class PosShiftController extends Controller
 
     public function stockVarianceReport(Request $request): JsonResponse
     {
-        $query = PosShiftStockItem::with(['product', 'shiftSession.store'])
-            ->whereNotNull('variance')
-            ->orderByDesc('updated_at');
+        // Use explicit join for reliable cross-table filtering
+        $query = PosShiftStockItem::query()
+            ->join('pos_shift_sessions', 'pos_shift_stock_items.shift_session_id', '=', 'pos_shift_sessions.id')
+            ->with(['product', 'shiftSession.store'])
+            ->whereNotNull('pos_shift_stock_items.variance')
+            ->orderByDesc('pos_shift_stock_items.updated_at');
 
-        if ($request->filled('store_id')) {
-            $query->whereHas('shiftSession', fn ($shiftQuery) => $shiftQuery->where('store_id', $request->query('store_id')));
+        if ($storeId = $request->query('store_id')) {
+            $query->where('pos_shift_sessions.store_id', $storeId);
         }
 
-        if ($request->filled('business_date')) {
-            $query->whereHas('shiftSession', fn ($shiftQuery) => $shiftQuery->whereDate('business_date', $request->query('business_date')));
+        if ($businessDate = $request->query('business_date')) {
+            $query->whereDate('pos_shift_sessions.business_date', $businessDate);
         }
 
-        $items = $query->limit((int) $request->query('limit', 200))->get();
+        // Date range filter
+        if ($startDate = $request->query('start_date')) {
+            $query->whereDate('pos_shift_sessions.business_date', '>=', $startDate);
+        }
+        if ($endDate = $request->query('end_date')) {
+            $query->whereDate('pos_shift_sessions.business_date', '<=', $endDate);
+        }
+
+        $perPage = (int) $request->query('per_page', 25);
+        $paginated = $query->select('pos_shift_stock_items.*')->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data' => $items->map(fn (PosShiftStockItem $item) => [
+            'data' => $paginated->getCollection()->map(fn (PosShiftStockItem $item) => [
                 'shift_id' => $item->shift_session_id,
                 'business_date' => $item->shiftSession?->business_date?->toDateString(),
                 'store' => $item->shiftSession?->store ? [
@@ -147,6 +159,12 @@ class PosShiftController extends Controller
                 'variance' => $item->variance,
                 'closing_note' => $item->closing_note,
             ])->values(),
+            'meta' => [
+                'current_page' => $paginated->currentPage(),
+                'total_pages' => $paginated->lastPage(),
+                'total_items' => $paginated->total(),
+                'per_page' => $paginated->perPage(),
+            ],
         ]);
     }
 

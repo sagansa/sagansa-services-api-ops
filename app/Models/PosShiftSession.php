@@ -14,6 +14,7 @@ class PosShiftSession extends Model
     public const STATUS_CLOSED = 'closed';
     public const STATUS_FORCE_CLOSED = 'force_closed';
 
+    protected $connection = 'mysql_ops';
     protected $table = 'pos_shift_sessions';
 
     protected $fillable = [
