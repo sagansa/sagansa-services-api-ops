@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PosShiftSession;
 use App\Models\PosShiftStockItem;
+use App\Models\PosShiftStockMovement;
+use App\Models\PosShiftAuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -39,7 +41,7 @@ class PosShiftController extends Controller
 
     public function show(string $shift): JsonResponse
     {
-        $session = PosShiftSession::with(['store', 'opener', 'closer', 'stockItems.product'])
+        $session = PosShiftSession::with(['store', 'opener', 'closer', 'forceClosedBy', 'stockItems.product'])
             ->findOrFail($shift);
 
         return response()->json([
@@ -148,6 +150,60 @@ class PosShiftController extends Controller
         ]);
     }
 
+    public function movements(string $shift): JsonResponse
+    {
+        $session = PosShiftSession::findOrFail($shift);
+        $movements = PosShiftStockMovement::with(['product', 'order'])
+            ->where('shift_session_id', $session->id)
+            ->orderBy('created_at')
+            ->get();
+
+        return response()->json([
+             'success' => true,
+             'data' => $movements->map(fn (PosShiftStockMovement $m) => [
+                 'id' => $m->id,
+                 'product' => $m->product ? [
+                     'id' => $m->product->id,
+                     'name' => $m->product->name,
+                 ] : null,
+                 'type' => $m->type,
+                 'quantity' => (int) $m->quantity,
+                 'note' => $m->note,
+                 'order' => $m->order ? [
+                     'id' => $m->order->id,
+                     'receipt_number' => $m->order->receipt_number,
+                 ] : null,
+                 'created_at' => $m->created_at?->toISOString(),
+             ])->values(),
+        ]);
+    }
+
+    public function auditLogs(string $shift): JsonResponse
+    {
+        $session = PosShiftSession::findOrFail($shift);
+        $logs = PosShiftAuditLog::with('creator')
+            ->where('shift_session_id', $session->id)
+            ->orderByDesc('created_at')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $logs->map(fn (PosShiftAuditLog $l) => [
+                'id' => $l->id,
+                'action' => $l->action,
+                'before_payload' => $l->before_payload,
+                'after_payload' => $l->after_payload,
+                'reason' => $l->reason,
+                'created_by_user_id' => $l->created_by_user_id,
+                'created_by' => $l->creator ? [
+                    'id' => $l->creator->id,
+                    'name' => $l->creator->name,
+                ] : null,
+                'created_at' => $l->created_at?->toISOString(),
+            ])->values(),
+        ]);
+    }
+
     private function serializeShift(PosShiftSession $shift, bool $includeItems): array
     {
         $isOverdue = $shift->status === PosShiftSession::STATUS_OPEN
@@ -174,6 +230,10 @@ class PosShiftController extends Controller
             'closing_note' => $shift->closing_note,
             'is_force_closed' => (bool) $shift->is_force_closed,
             'force_close_reason' => $shift->force_close_reason,
+            'force_closed_by' => $shift->forceClosedBy ? [
+                'id' => $shift->forceClosedBy->id,
+                'name' => $shift->forceClosedBy->name,
+            ] : null,
             'stock_items_count' => $shift->stock_items_count ?? $shift->stockItems->count(),
         ];
 

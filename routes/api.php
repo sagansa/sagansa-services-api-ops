@@ -132,6 +132,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/ops/shifts/reports/stock-variance', [PosShiftController::class, 'stockVarianceReport']);
     Route::get('/ops/shifts/{shift}', [PosShiftController::class, 'show']);
     Route::post('/ops/shifts/{shift}/force-close', [PosShiftController::class, 'forceClose']);
+    Route::get('/ops/shifts/{shift}/movements', [PosShiftController::class, 'movements']);
+    Route::get('/ops/shifts/{shift}/audit-logs', [PosShiftController::class, 'auditLogs']);
     
     // Presence (Attendance)
     Route::get('/presence', [PresenceController::class, 'index']);

@@ -58,4 +58,19 @@ class PosShiftSession extends Model
     {
         return $this->hasMany(PosShiftStockItem::class, 'shift_session_id');
     }
+
+    public function movements()
+    {
+        return $this->hasMany(PosShiftStockMovement::class, 'shift_session_id');
+    }
+
+    public function auditLogs()
+    {
+        return $this->hasMany(PosShiftAuditLog::class, 'shift_session_id');
+    }
+
+    public function forceClosedBy()
+    {
+        return $this->belongsTo(User::class, 'force_closed_by_user_id', 'uuid');
+    }
 }
