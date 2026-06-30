@@ -30,11 +30,11 @@ class UserController extends Controller
 
         $perPage = (int) $request->get('per_page', 25);
 
-        // Build query WITHOUT auto-eager-load detail and WITHOUT $appends accessor
+        // Build query WITHOUT auto-eager-load detail. The per-instance $appends
+        // accessor ('last_active_at') is disabled after pagination (see below).
         $query = User::query()
             ->select('id', 'uuid', 'name', 'email', 'tenant_id', 'is_active', 'created_at')
-            ->without(['detail'])         // Skip cross-DB UserDetail eager-load
-            ->setAppends([]);             // Skip N+1 last_active_at token query
+            ->without(['detail']);         // Skip cross-DB UserDetail eager-load
 
         if ($search = $request->get('search')) {
             $query->where(function ($q) use ($search) {
@@ -57,6 +57,7 @@ class UserController extends Controller
 
         // Load relationships ONLY for the paginated items
         $items = $users->getCollection();
+        $items->each->setAppends([]);     // Disable 'last_active_at' accessor to avoid N+1 token query
         $items->load([
             'roles:id,name',
             'tenants' => function ($q) {
