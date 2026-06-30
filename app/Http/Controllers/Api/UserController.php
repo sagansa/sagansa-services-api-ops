@@ -15,13 +15,12 @@ class UserController extends Controller
 {
     /**
      * Display a listing of users
-     * Optimized: lightweight select + lazy-load relationships only for the current page.
+     * Optimized: avoid N+1 from $appends accessor and $with eager-loading.
      */
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
 
-        // Only super-admin can access global users endpoint
         if (!$user->hasRole('super-admin')) {
             return response()->json([
                 'success' => false,
@@ -29,11 +28,14 @@ class UserController extends Controller
             ], 403);
         }
 
-        // Build query with minimal columns (avoid SELECT *)
-        $query = User::query()
-            ->select('id', 'uuid', 'name', 'email', 'tenant_id', 'is_active', 'last_active_at', 'created_at', 'updated_at');
+        $perPage = (int) $request->get('per_page', 25);
 
-        // Apply search BEFORE pagination
+        // Build query WITHOUT auto-eager-load detail and WITHOUT $appends accessor
+        $query = User::query()
+            ->select('id', 'uuid', 'name', 'email', 'tenant_id', 'is_active', 'created_at')
+            ->without(['detail'])         // Skip cross-DB UserDetail eager-load
+            ->setAppends([]);             // Skip N+1 last_active_at token query
+
         if ($search = $request->get('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
@@ -51,10 +53,9 @@ class UserController extends Controller
             $query->where('tenant_id', $tenantId);
         }
 
-        $perPage = (int) $request->get('per_page', 25);
         $users = $query->orderByDesc('created_at')->paginate($perPage);
 
-        // Lazy-load relationships ONLY for the current page items (not all users)
+        // Load relationships ONLY for the paginated items
         $items = $users->getCollection();
         $items->load([
             'roles:id,name',
@@ -63,20 +64,6 @@ class UserController extends Controller
                   ->withPivot(['role', 'assigned_by']);
             },
         ]);
-
-        // Attach tenant info efficiently
-        $items->each(function ($u) {
-            $u->makeHidden(['updated_at']);
-            // Set tenant from first owner membership if not set
-            if (!$u->tenant_id) {
-                $ownerMembership = $u->tenants->firstWhere('pivot.role', 'owner');
-                if ($ownerMembership) {
-                    $u->setRelation('tenant', $ownerMembership);
-                }
-            } else {
-                $u->load('tenant:id,name,operation_mode,owner_id');
-            }
-        });
 
         return response()->json([
             'success' => true,
