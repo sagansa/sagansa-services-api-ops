@@ -32,9 +32,10 @@ class UserController extends Controller
 
         // Build query WITHOUT auto-eager-load detail. The per-instance $appends
         // accessor ('last_active_at') is disabled after pagination (see below).
-        // Note: users table (mysql_auth) does NOT have tenant_id column.
+        // Note: users table (mysql_auth) does NOT have tenant_id or is_active columns.
+        // is_active lives in user_details (cross-DB), so we don't select it here.
         $query = User::query()
-            ->select('id', 'uuid', 'name', 'email', 'is_active', 'created_at')
+            ->select('id', 'uuid', 'name', 'email', 'created_at')
             ->without(['detail']);         // Skip cross-DB UserDetail eager-load
 
         if ($search = $request->get('search')) {
