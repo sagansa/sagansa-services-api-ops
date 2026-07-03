@@ -15,7 +15,7 @@ class PosShiftController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = PosShiftSession::with(['store', 'opener', 'closer'])
+        $query = PosShiftSession::with(['store', 'opener', 'closer', 'cashShift'])
             ->withCount('stockItems')
             ->orderByDesc('opened_at');
 
@@ -41,7 +41,7 @@ class PosShiftController extends Controller
 
     public function show(string $shift): JsonResponse
     {
-        $session = PosShiftSession::with(['store', 'opener', 'closer', 'forceClosedBy', 'stockItems.product'])
+        $session = PosShiftSession::with(['store', 'opener', 'closer', 'forceClosedBy', 'stockItems.product', 'cashShift.mutations'])
             ->findOrFail($shift);
 
         return response()->json([
@@ -254,6 +254,32 @@ class PosShiftController extends Controller
             ] : null,
             'stock_items_count' => $shift->stock_items_count ?? $shift->stockItems->count(),
         ];
+
+        if ($shift->relationLoaded('cashShift') && $shift->cashShift) {
+            $cash = $shift->cashShift;
+            $payload['cash_shift'] = [
+                'id' => $cash->id,
+                'start_cash' => (float) $cash->start_cash,
+                'end_cash' => $cash->end_cash !== null ? (float) $cash->end_cash : null,
+                'started_at' => $cash->started_at?->toISOString(),
+                'ended_at' => $cash->ended_at?->toISOString(),
+                'status' => $cash->status,
+                'cash_sales' => (float) $cash->cash_sales,
+                'total_expense' => (float) $cash->total_expense,
+                'total_handover' => (float) $cash->total_handover,
+                'expected_cash' => (float) $cash->expected_cash,
+                'variance' => $cash->end_cash !== null ? (float) ($cash->end_cash - $cash->expected_cash) : null,
+                'mutations' => $cash->relationLoaded('mutations') ? $cash->mutations->map(fn ($m) => [
+                    'id' => $m->id,
+                    'type' => $m->type,
+                    'amount' => (float) $m->amount,
+                    'note' => $m->note,
+                    'created_at' => $m->created_at?->toISOString(),
+                ])->values()->all() : [],
+            ];
+        } else {
+            $payload['cash_shift'] = null;
+        }
 
         if ($includeItems) {
             $payload['items'] = $shift->stockItems->map(fn (PosShiftStockItem $item) => [

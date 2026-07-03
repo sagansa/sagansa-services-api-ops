@@ -74,4 +74,9 @@ class PosShiftSession extends Model
     {
         return $this->belongsTo(User::class, 'force_closed_by_user_id', 'uuid');
     }
+
+    public function cashShift()
+    {
+        return $this->hasOne(Shift::class, 'pos_shift_session_id', 'id');
+    }
 }
