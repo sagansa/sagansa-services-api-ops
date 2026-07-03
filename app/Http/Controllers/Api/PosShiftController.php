@@ -27,7 +27,9 @@ class PosShiftController extends Controller
             $query->where('status', $request->query('status'));
         }
 
-        if ($request->filled('business_date')) {
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $query->whereBetween('business_date', [$request->query('start_date'), $request->query('end_date')]);
+        } elseif ($request->filled('business_date')) {
             $query->whereDate('business_date', $request->query('business_date'));
         }
 
@@ -255,8 +257,19 @@ class PosShiftController extends Controller
             'stock_items_count' => $shift->stock_items_count ?? $shift->stockItems->count(),
         ];
 
-        if ($shift->relationLoaded('cashShift') && $shift->cashShift) {
-            $cash = $shift->cashShift;
+        $cash = $shift->cashShift;
+        if (!$cash) {
+            // Fallback matching for legacy shifts before migration
+            $cash = \App\Models\Shift::where('store_id', $shift->store_id)
+                ->where('user_id', $shift->opened_by_user_id)
+                ->whereDate('started_at', $shift->business_date)
+                ->first();
+            if ($cash) {
+                $cash->load('mutations');
+            }
+        }
+
+        if ($cash) {
             $payload['cash_shift'] = [
                 'id' => $cash->id,
                 'start_cash' => (float) $cash->start_cash,
@@ -269,7 +282,7 @@ class PosShiftController extends Controller
                 'total_handover' => (float) $cash->total_handover,
                 'expected_cash' => (float) $cash->expected_cash,
                 'variance' => $cash->end_cash !== null ? (float) ($cash->end_cash - $cash->expected_cash) : null,
-                'mutations' => $cash->relationLoaded('mutations') ? $cash->mutations->map(fn ($m) => [
+                'mutations' => $cash->mutations ? $cash->mutations->map(fn ($m) => [
                     'id' => $m->id,
                     'type' => $m->type,
                     'amount' => (float) $m->amount,
