@@ -29,6 +29,15 @@ class SetActiveTenant
             $activeTenantId = $user->tenant_id;
         }
 
+        // Guard: if still null, the user has no resolvable active tenant.
+        // Return 422 instead of storing null and causing Tenant::findOrFail(null) crashes.
+        if (!$activeTenantId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No active tenant. Please select a tenant before continuing.',
+            ], 422);
+        }
+
         // Validate user has access to this tenant
         $hasAccess = $user->tenant_id === $activeTenantId 
             || $user->tenants()->where('tenants.id', $activeTenantId)->exists();
