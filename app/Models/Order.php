@@ -22,6 +22,7 @@ class Order extends Model
         'created_by', // user or device
         'customer_name',
         'table_code',
+        'order_type',
         'status',
         'payment_status',
         'subtotal',

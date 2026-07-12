@@ -25,6 +25,7 @@ class Plan extends Model
         'name',
         'pos_rate_percent',
         'pos_base_charge',
+        'pos_usage_threshold',
         'attendance_rate',
         'attendance_free_count',
         'trial_months',
@@ -34,6 +35,7 @@ class Plan extends Model
     protected $casts = [
         'pos_rate_percent' => 'decimal:4',
         'pos_base_charge' => 'integer',
+        'pos_usage_threshold' => 'integer',
         'attendance_rate' => 'integer',
         'attendance_free_count' => 'integer',
         'trial_months' => 'integer',
