@@ -22,6 +22,11 @@ class AppServiceProvider extends ServiceProvider
                 });
             }
         }
+
+        $this->app->bind(
+            \App\Contracts\ImageStorageContract::class,
+            \App\Services\ImageUploadService::class
+        );
     }
 
     /**

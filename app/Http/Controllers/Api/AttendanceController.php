@@ -312,36 +312,43 @@ class AttendanceController extends Controller
         // Handle photo upload
         $photoPath = null;
         if ($request->hasFile('photo')) {
-            $photoPath = $request->file('photo')->store('presence/selfies', 'public');
+            $photoPath = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('photo'), 'presence/selfies');
         } elseif ($request->filled('photo') && is_string($request->input('photo'))) {
             $photoPath = $request->input('photo');
         }
 
-        // Create attendance record
-        $attendance = Attendance::create([
-            'store_id' => $validated['store_id'],
-            'check_in_store_id' => $validated['store_id'],
-            'shift_store_id' => $validated['shift_store_id'],
-            'status' => 'pending',
-            'presence_type' => 'checkin',
-            'image_in' => $photoPath,
-            'check_in' => $checkInAt,
-            'latitude_in' => $validated['latitude'],
-            'longitude_in' => $validated['longitude'],
-            'gps_accuracy' => $validated['accuracy'] ?? null,
-            'device_info' => null,
-            'ip_address' => $request->ip(),
-            'is_within_range' => true,
-            'distance_to_store' => $this->calculateDistanceInMeters($store->latitude, $store->longitude, (float) $validated['latitude'], (float) $validated['longitude']),
-            'was_late' => $wasLate,
-            'created_by_id' => $userKey,
-        ]);
+        try {
+            // Create attendance record
+            $attendance = Attendance::create([
+                'store_id' => $validated['store_id'],
+                'check_in_store_id' => $validated['store_id'],
+                'shift_store_id' => $validated['shift_store_id'],
+                'status' => 'pending',
+                'presence_type' => 'checkin',
+                'image_in' => $photoPath,
+                'check_in' => $checkInAt,
+                'latitude_in' => $validated['latitude'],
+                'longitude_in' => $validated['longitude'],
+                'gps_accuracy' => $validated['accuracy'] ?? null,
+                'device_info' => null,
+                'ip_address' => $request->ip(),
+                'is_within_range' => true,
+                'distance_to_store' => $this->calculateDistanceInMeters($store->latitude, $store->longitude, (float) $validated['latitude'], (float) $validated['longitude']),
+                'was_late' => $wasLate,
+                'created_by_id' => $userKey,
+            ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Check-in successful',
-            'attendance' => (new AttendanceResource($attendance))->toArray($request)
-        ], 201);
+            return response()->json([
+                'success' => true,
+                'message' => 'Check-in successful',
+                'attendance' => (new AttendanceResource($attendance))->toArray($request)
+            ], 201);
+        } catch (\Exception $e) {
+            if (isset($photoPath)) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($photoPath);
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -382,29 +389,39 @@ class AttendanceController extends Controller
         // Handle photo upload
         $photoPath = null;
         if ($request->hasFile('photo')) {
-            $photoPath = $request->file('photo')->store('presence/selfies', 'public');
+            if ($attendance->image_out) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($attendance->image_out);
+            }
+            $photoPath = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('photo'), 'presence/selfies');
         } elseif ($request->filled('photo') && is_string($request->input('photo'))) {
             $photoPath = $request->input('photo');
         }
 
-        // Update attendance record
-        $attendance->update([
-            'check_out_store_id' => $validated['store_id'],
-            'status' => 'approved',
-            'image_out' => $photoPath,
-            'check_out' => $checkOutAt,
-            'latitude_out' => $validated['latitude'],
-            'longitude_out' => $validated['longitude'],
-            'gps_accuracy' => $validated['accuracy'] ?? null,
-            'distance_to_store' => $this->calculateDistanceInMeters($store->latitude, $store->longitude, (float) $validated['latitude'], (float) $validated['longitude']),
-            'is_within_range' => true,
-        ]);
+        try {
+            // Update attendance record
+            $attendance->update([
+                'check_out_store_id' => $validated['store_id'],
+                'status' => 'approved',
+                'image_out' => $photoPath,
+                'check_out' => $checkOutAt,
+                'latitude_out' => $validated['latitude'],
+                'longitude_out' => $validated['longitude'],
+                'gps_accuracy' => $validated['accuracy'] ?? null,
+                'distance_to_store' => $this->calculateDistanceInMeters($store->latitude, $store->longitude, (float) $validated['latitude'], (float) $validated['longitude']),
+                'is_within_range' => true,
+            ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Check-out successful',
-            'attendance' => (new AttendanceResource($attendance))->toArray($request)
-        ], 200);
+            return response()->json([
+                'success' => true,
+                'message' => 'Check-out successful',
+                'attendance' => (new AttendanceResource($attendance))->toArray($request)
+            ], 200);
+        } catch (\Exception $e) {
+            if (isset($photoPath)) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($photoPath);
+            }
+            throw $e;
+        }
     }
 
     private function ensureNoOpenAttendance(User $user): void

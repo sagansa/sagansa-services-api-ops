@@ -143,7 +143,7 @@ class PresenceController extends Controller
             // Handle selfie photo upload
             $selfiePath = null;
             if ($request->hasFile('selfie_photo')) {
-                $selfiePath = $request->file('selfie_photo')->store('presence/selfies', 'public');
+                $selfiePath = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('selfie_photo'), 'presence/selfies');
             } elseif ($request->filled('selfie_photo') && is_string($request->input('selfie_photo'))) {
                 $selfiePath = $request->input('selfie_photo');
             }
@@ -180,6 +180,9 @@ class PresenceController extends Controller
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
+            if (isset($selfiePath)) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($selfiePath);
+            }
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to check in: ' . $e->getMessage()
@@ -244,7 +247,10 @@ class PresenceController extends Controller
             // Handle selfie photo upload untuk check-out
             $selfiePath = null;
             if ($request->hasFile('selfie_photo')) {
-                $selfiePath = $request->file('selfie_photo')->store('presence/selfies', 'public');
+                if ($attendance->image_out) {
+                    app(\App\Contracts\ImageStorageContract::class)->delete($attendance->image_out);
+                }
+                $selfiePath = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('selfie_photo'), 'presence/selfies');
             } elseif ($request->filled('selfie_photo') && is_string($request->input('selfie_photo'))) {
                 $selfiePath = $request->input('selfie_photo');
             }
@@ -274,6 +280,9 @@ class PresenceController extends Controller
                 ]
             ]);
         } catch (\Exception $e) {
+            if (isset($selfiePath)) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($selfiePath);
+            }
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to check out: ' . $e->getMessage()

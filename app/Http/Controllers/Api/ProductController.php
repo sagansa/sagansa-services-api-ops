@@ -121,7 +121,7 @@ class ProductController extends Controller
         $this->ensureOpsUserExists($user);
 
         if ($request->hasFile('image')) {
-            $path = $request->file('image')->store('products', 'public');
+            $path = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('image'), 'products');
             $data['image'] = $path;
         } elseif ($request->filled('image') && is_string($request->input('image'))) {
             $data['image'] = $request->input('image');
@@ -211,19 +211,19 @@ class ProductController extends Controller
         $data = $request->validated();
 
         if ($request->boolean('remove_image')) {
-            if ($product->image && !str_starts_with($product->image, 'http')) {
-                Storage::disk('public')->delete($product->image);
+            if ($product->image) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($product->image);
             }
             $data['image'] = null;
         } elseif ($request->hasFile('image')) {
-            if ($product->image && !str_starts_with($product->image, 'http')) {
-                Storage::disk('public')->delete($product->image);
+            if ($product->image) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($product->image);
             }
-            $path = $request->file('image')->store('products', 'public');
+            $path = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('image'), 'products');
             $data['image'] = $path;
         } elseif ($request->filled('image') && is_string($request->input('image'))) {
-            if ($product->image && !str_starts_with($product->image, 'http') && $product->image !== $request->input('image')) {
-                Storage::disk('public')->delete($product->image);
+            if ($product->image && $product->image !== $request->input('image')) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($product->image);
             }
             $data['image'] = $request->input('image');
         }

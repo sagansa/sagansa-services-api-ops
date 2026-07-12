@@ -66,7 +66,7 @@ class ProductController extends ApiController
 
             // Handle image upload if present
             if ($request->hasFile('image')) {
-                $imagePath = $request->file('image')->store('products', 'public');
+                $imagePath = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('image'), 'products');
                 $productData['image'] = $imagePath;
             }
 
@@ -150,7 +150,10 @@ class ProductController extends ApiController
 
             // Handle image upload if present
             if ($request->hasFile('image')) {
-                $imagePath = $request->file('image')->store('products', 'public');
+                if ($product->image) {
+                    app(\App\Contracts\ImageStorageContract::class)->delete($product->image);
+                }
+                $imagePath = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('image'), 'products');
                 $productData['image'] = $imagePath;
             }
 

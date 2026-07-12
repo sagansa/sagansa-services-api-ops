@@ -73,7 +73,7 @@ class PresenceController extends ApiController
             // Handle image upload
             $imagePath = null;
             if ($request->hasFile('image_in')) {
-                $imagePath = $request->file('image_in')->store('attendances', 'public');
+                $imagePath = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('image_in'), 'attendances');
             } elseif ($request->filled('image_in') && is_string($request->input('image_in'))) {
                 $imagePath = $request->input('image_in');
             }
@@ -94,6 +94,9 @@ class PresenceController extends ApiController
             return response()->json($attendance->load(['store', 'shiftStore', 'creator', 'approver']), 201);
         } catch (\Exception $e) {
             DB::rollBack();
+            if (isset($imagePath)) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($imagePath);
+            }
             return response()->json(['error' => 'Failed to create attendance record'], 500);
         }
     }
@@ -139,7 +142,10 @@ class PresenceController extends ApiController
             // Handle image upload
             $imagePath = null;
             if ($request->hasFile('image_out')) {
-                $imagePath = $request->file('image_out')->store('attendances', 'public');
+                if ($attendance->image_out) {
+                    app(\App\Contracts\ImageStorageContract::class)->delete($attendance->image_out);
+                }
+                $imagePath = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('image_out'), 'attendances');
             } elseif ($request->filled('image_out') && is_string($request->input('image_out'))) {
                 $imagePath = $request->input('image_out');
             }
@@ -162,6 +168,9 @@ class PresenceController extends ApiController
             return response()->json($attendance->load(['store', 'shiftStore', 'creator', 'approver']));
         } catch (\Exception $e) {
             DB::rollBack();
+            if (isset($imagePath)) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($imagePath);
+            }
             return response()->json(['error' => 'Failed to update attendance record'], 500);
         }
     }

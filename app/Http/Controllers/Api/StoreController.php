@@ -220,14 +220,20 @@ class StoreController extends Controller
         ]);
 
         if ($request->hasFile('email_receipt_logo')) {
-            $path = $request->file('email_receipt_logo')->store('store-logos', 'public');
+            if ($store->email_receipt_logo) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($store->email_receipt_logo);
+            }
+            $path = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('email_receipt_logo'), 'store-logos');
             $data['email_receipt_logo'] = $path;
         } elseif ($request->filled('email_receipt_logo') && is_string($request->input('email_receipt_logo'))) {
             $data['email_receipt_logo'] = $request->input('email_receipt_logo');
         }
 
         if ($request->hasFile('print_receipt_logo')) {
-            $path = $request->file('print_receipt_logo')->store('store-logos', 'public');
+            if ($store->print_receipt_logo) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($store->print_receipt_logo);
+            }
+            $path = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('print_receipt_logo'), 'store-logos');
             $data['print_receipt_logo'] = $path;
         } elseif ($request->filled('print_receipt_logo') && is_string($request->input('print_receipt_logo'))) {
             $data['print_receipt_logo'] = $request->input('print_receipt_logo');
@@ -331,14 +337,20 @@ class StoreController extends Controller
         ]);
 
         if ($request->hasFile('email_receipt_logo')) {
-            $path = $request->file('email_receipt_logo')->store('store-logos', 'public');
+            if ($store->email_receipt_logo) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($store->email_receipt_logo);
+            }
+            $path = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('email_receipt_logo'), 'store-logos');
             $data['email_receipt_logo'] = $path;
         } elseif ($request->filled('email_receipt_logo') && is_string($request->input('email_receipt_logo'))) {
             $data['email_receipt_logo'] = $request->input('email_receipt_logo');
         }
 
         if ($request->hasFile('print_receipt_logo')) {
-            $path = $request->file('print_receipt_logo')->store('store-logos', 'public');
+            if ($store->print_receipt_logo) {
+                app(\App\Contracts\ImageStorageContract::class)->delete($store->print_receipt_logo);
+            }
+            $path = app(\App\Contracts\ImageStorageContract::class)->upload($request->file('print_receipt_logo'), 'store-logos');
             $data['print_receipt_logo'] = $path;
         } elseif ($request->filled('print_receipt_logo') && is_string($request->input('print_receipt_logo'))) {
             $data['print_receipt_logo'] = $request->input('print_receipt_logo');
