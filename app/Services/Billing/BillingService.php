@@ -15,9 +15,11 @@ use Illuminate\Support\Facades\DB;
  * BillingService — inti perhitungan charge SAGANSA.
  *
  * POS     = min(omzet_store × rate%, base_charge) per store, dikurangi diskon.
- * Attendance = gratis bila pakai POS; else (karyawan_aktif − free) × rate.
+ * Attendance = gratis bila omzet penjualan bulanan >= pos_usage_threshold (Opsi A);
+ *              else (karyawan_aktif − free_count) × rate (Opsi B).
  *
- * Omzet dihitung dari tabel `orders` WHERE status='completed'.
+ * Omzet dihitung dari tabel `orders` WHERE status='completed'
+ * AND order_type='sale' AND grand_total > 0.
  */
 class BillingService
 {
@@ -146,6 +148,7 @@ class BillingService
             'code' => $plan->code,
             'pos_rate_percent' => (float) $plan->pos_rate_percent,
             'pos_base_charge' => $plan->pos_base_charge,
+            'pos_usage_threshold' => $plan->pos_usage_threshold,
             'attendance_rate' => $plan->attendance_rate,
             'attendance_free_count' => $plan->attendance_free_count,
             'discounts' => $plan->activeDiscounts()->map(fn($d) => [
