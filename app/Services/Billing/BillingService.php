@@ -15,9 +15,11 @@ use Illuminate\Support\Facades\DB;
  * BillingService — inti perhitungan charge SAGANSA.
  *
  * POS     = min(omzet_store × rate%, base_charge) per store, dikurangi diskon.
- * Attendance = gratis bila pakai POS; else (karyawan_aktif − free) × rate.
+ * Attendance = gratis bila omzet penjualan bulanan >= pos_usage_threshold (Opsi A);
+ *              else (karyawan_aktif − free_count) × rate (Opsi B).
  *
- * Omzet dihitung dari tabel `orders` WHERE status='completed'.
+ * Omzet dihitung dari tabel `orders` WHERE status='completed'
+ * AND order_type='sale' AND grand_total > 0.
  */
 class BillingService
 {
@@ -35,6 +37,8 @@ class BillingService
             ->join('stores', 'orders.store_id', '=', 'stores.id')
             ->where('orders.tenant_id', $tenant->id)
             ->where('orders.status', 'completed')
+            ->where('orders.order_type', 'sale')           // hanya penjualan nyata
+            ->where('orders.grand_total', '>', 0)          // exclude Rp 0 / comp / void / training
             ->whereBetween('orders.created_at', [$start . ' 00:00:00', $end . ' 23:59:59'])
             ->whereNull('stores.deleted_at')
             ->select(
@@ -98,11 +102,12 @@ class BillingService
 
     /**
      * Hitung charge attendance.
-     * Gratis bila tenant pakai POS (ada omzet > 0).
+     * Gratis bila tenant aktif pakai POS (omzet bulanan >= threshold) — Opsi A.
+     * Selain itu: (karyawan_aktif - free_count) x rate bila melebihi free — Opsi B.
      */
-    public function calculateAttendanceCharge(int $activeEmployees, bool $hasPosUsage, Plan $plan): int
+    public function calculateAttendanceCharge(int $activeEmployees, int $posRevenueTotal, Plan $plan): int
     {
-        if ($hasPosUsage) {
+        if ($posRevenueTotal >= $plan->pos_usage_threshold) {
             return 0;
         }
         if ($activeEmployees <= $plan->attendance_free_count) {
@@ -143,6 +148,7 @@ class BillingService
             'code' => $plan->code,
             'pos_rate_percent' => (float) $plan->pos_rate_percent,
             'pos_base_charge' => $plan->pos_base_charge,
+            'pos_usage_threshold' => $plan->pos_usage_threshold,
             'attendance_rate' => $plan->attendance_rate,
             'attendance_free_count' => $plan->attendance_free_count,
             'discounts' => $plan->activeDiscounts()->map(fn($d) => [
@@ -166,14 +172,14 @@ class BillingService
 
         // 1. Omzet per-store
         $revenues = $this->calculateStoreRevenue($tenant, $year, $month);
-        $hasPosUsage = count($revenues) > 0;
+        $posRevenueTotal = array_sum(array_column($revenues, 'revenue'));
 
         // 2. POS charge
         $pos = $this->calculatePosCharge($revenues, $plan);
 
         // 3. Attendance charge
         $activeEmployees = $this->countActiveEmployees($tenant, $year, $month);
-        $attendanceCharge = $this->calculateAttendanceCharge($activeEmployees, $hasPosUsage, $plan);
+        $attendanceCharge = $this->calculateAttendanceCharge($activeEmployees, $posRevenueTotal, $plan);
 
         // 4. Diskon (applies_to 'total' atau 'pos')
         $posDiscounts = $plan->activeDiscounts('pos');
@@ -217,11 +223,11 @@ class BillingService
         $month = $now->month;
 
         $revenues = $this->calculateStoreRevenue($tenant, $year, $month);
-        $hasPosUsage = count($revenues) > 0;
+        $posRevenueTotal = array_sum(array_column($revenues, 'revenue'));
 
         $pos = $this->calculatePosCharge($revenues, $plan);
         $activeEmployees = $this->countActiveEmployees($tenant, $year, $month);
-        $attendanceCharge = $this->calculateAttendanceCharge($activeEmployees, $hasPosUsage, $plan);
+        $attendanceCharge = $this->calculateAttendanceCharge($activeEmployees, $posRevenueTotal, $plan);
 
         $posDiscounts = $plan->activeDiscounts('pos');
         $posDiscountResult = $this->calculateDiscount($pos['total'], $posDiscounts);
@@ -238,7 +244,8 @@ class BillingService
             'total_charge' => $total,
             'pos_breakdown' => $pos['breakdown'],
             'attendance_employees_count' => $activeEmployees,
-            'has_pos_usage' => $hasPosUsage,
+            'pos_revenue_total' => $posRevenueTotal,
+            'has_pos_usage' => $posRevenueTotal >= $plan->pos_usage_threshold,
         ];
     }
 
