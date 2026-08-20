@@ -32,17 +32,19 @@ class LeaveController extends Controller
         if ($activeTenantId = $request->attributes->get('current_tenant_id')) {
             $query->where('tenant_id', $activeTenantId);
         } else {
-            // Check if user is admin, super-admin, or owner of their tenant
-            $isOwner = $user->tenant && $user->tenant->owner_id === $userKey;
-            
-            if (! $user->hasAnyRole(['admin', 'super-admin']) && !$isOwner) {
-                $query->where('user_id', $userKey);
-            } else {
-                $tenantIds = $this->resolveAccessibleTenantIds($user);
-                if (! empty($tenantIds)) {
-                    $query->whereIn('tenant_id', $tenantIds);
-                }
+            $tenantIds = $this->resolveAccessibleTenantIds($user);
+            if (! empty($tenantIds)) {
+                $query->whereIn('tenant_id', $tenantIds);
             }
+        }
+
+        // Ownership filter: non-admin / non-owner only see their own records.
+        // Kept outside the tenant branch so it always applies when a tenant
+        // header is present (production frontend always sends X-Active-Tenant).
+        $isOwner = $user->tenant && $user->tenant->owner_id === $userKey;
+
+        if (! $user->hasAnyRole(['admin', 'super-admin']) && !$isOwner) {
+            $query->where('user_id', $userKey);
         }
 
         if (! empty($validated['status'])) {
