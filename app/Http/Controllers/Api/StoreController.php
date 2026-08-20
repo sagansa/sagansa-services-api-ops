@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Store;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,7 +18,7 @@ class StoreController extends Controller
     {
         $user = $request->user();
         
-        $tenantId = $request->attributes->get('current_tenant_id') ?? $user->tenant_id;
+        $tenantId = $request->attributes->get('active_tenant_id') ?? $request->attributes->get('current_tenant_id') ?? $user->tenant_id;
         
         // Get stores associated with active tenant
         $stores = Store::where('tenant_id', $tenantId)
@@ -37,8 +38,8 @@ class StoreController extends Controller
     {
         $user = $request->user();
         
-        // Check if user has access to this tenant (either it's their tenant or they're a super admin)
-        if ($user->tenant_id !== $tenantId && !$user->hasRole('super-admin')) {
+        // Check if user has access to this tenant
+        if (! $this->canAccessTenant($user, $tenantId)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized access to tenant'
@@ -74,7 +75,7 @@ class StoreController extends Controller
             'longitude' => 'nullable|numeric',
         ]);
 
-        $tenantId = $request->attributes->get('current_tenant_id') ?? $user->tenant_id;
+        $tenantId = $request->attributes->get('active_tenant_id') ?? $request->attributes->get('current_tenant_id') ?? $user->tenant_id;
         $this->ensureOpsTenantExists($tenantId);
 
         $store = Store::create([
@@ -102,8 +103,8 @@ class StoreController extends Controller
     {
         $user = $request->user();
         
-        // Check if user has access to create stores for this tenant (either it's their tenant or they're a super admin)
-        if ($user->tenant_id !== $tenantId && !$user->hasRole('super-admin')) {
+        // Check if user has access to create stores for this tenant
+        if (! $this->canAccessTenant($user, $tenantId)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized to create stores for this tenant'
@@ -288,7 +289,7 @@ class StoreController extends Controller
     {
         $user = $request->user();
         
-        if ($user->tenant_id !== $tenantId && !$user->hasRole('super-admin')) {
+        if (! $this->canAccessTenant($user, $tenantId)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized to update stores for this tenant'
@@ -378,7 +379,7 @@ class StoreController extends Controller
         $user = $request->user();
         
         // Check if user has access to delete stores for this tenant
-        if ($user->tenant_id !== $tenantId && !$user->hasRole('super-admin')) {
+        if (! $this->canAccessTenant($user, $tenantId)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized to delete stores for this tenant'
@@ -402,6 +403,35 @@ class StoreController extends Controller
             'success' => true,
             'message' => 'Store deleted successfully'
         ]);
+    }
+
+    private function canAccessTenant(?User $user, string $tenantId): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if ($user->hasRole('super-admin')) {
+            return true;
+        }
+
+        if ((string) $user->tenant_id === (string) $tenantId) {
+            return true;
+        }
+
+        if ($user->relationLoaded('ownedTenant') && $user->ownedTenant && (string) $user->ownedTenant->id === (string) $tenantId) {
+            return true;
+        }
+
+        if ($user->ownedTenant()->where('id', $tenantId)->exists()) {
+            return true;
+        }
+
+        if ($user->tenants()->where('tenants.id', $tenantId)->exists()) {
+            return true;
+        }
+
+        return false;
     }
 
     private function ensureOpsTenantExists(?string $tenantId): void
